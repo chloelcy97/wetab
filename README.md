@@ -25,7 +25,7 @@ python3 server.py --port 8080
 
 ### 打开小票识别
 
-不配 key 也能用，识别会返回一条固定的演示数据，界面流程完全走得通。
+**本机开发**：不配 key 也能用，识别会返回一条固定的演示数据，界面流程完全走得通。
 要真的读小票，设一个 Anthropic API key 再启动：
 
 ```bash
@@ -38,6 +38,11 @@ python3 server.py
 ```bash
 export TALLY_MODEL=claude-sonnet-5
 ```
+
+**线上**：GitHub Pages 没有后端，识别要靠一个 Cloudflare Worker 存 key。
+代码和部署步骤在 `worker/receipt-scan.js` 的文件头注释里，全程网页操作，不需要 CLI。
+部署完把 Worker 网址填进 `config.js` 的 `SCAN_ENDPOINT`。留空的话，
+线上「拍小票自动识别」会自动隐藏，手动记账不受影响。
 
 ### 装到手机主屏
 
@@ -119,6 +124,7 @@ icons/                        原始 Phosphor SVG
 manifest.webmanifest          PWA 配置
 icon-*.png                    主屏图标（等号标记）
 server.py                     本地开发服务：静态文件 + /api/scan（线上不需要它）
+worker/receipt-scan.js        线上的小票识别代理，粘进 Cloudflare Worker 网页编辑器
 .claude/launch.json           给 Claude Code 用的启动配置
 supabase/schema.sql           建表 + RLS + 三个 RPC 函数，粘进 Supabase SQL Editor 跑
 ```
