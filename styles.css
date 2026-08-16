@@ -162,7 +162,7 @@ img { max-width: 100%; display: block; }
   align-items: center;
   gap: 8px;
 }
-.wordmark .icon { width: 19px; height: 19px; color: var(--accent); }
+.wordmark .icon { width: 21px; height: 21px; color: var(--accent); }
 
 .iconbtn {
   width: 36px; height: 36px;

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tally 本地服务 —— 只用 Python 标准库，不需要 pip install。
+WeTab 本地服务 —— 只用 Python 标准库，不需要 pip install。
 
   python3 server.py            # http://localhost:5173
   python3 server.py --port 8080
@@ -228,7 +228,7 @@ def main():
     p.add_argument("--port", type=int, default=5173)
     args = p.parse_args()
 
-    print(f"\n  Tally  →  http://localhost:{args.port}")
+    print(f"\n  WeTab  →  http://localhost:{args.port}")
     print(f"  小票识别：{'已启用 · ' + MODEL if API_KEY else '演示模式（未设置 ANTHROPIC_API_KEY）'}")
     print("  Ctrl+C 停止\n")
 

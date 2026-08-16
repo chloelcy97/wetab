@@ -1,6 +1,6 @@
 {
-  "name": "Tally · 双人账本",
-  "short_name": "Tally",
+  "name": "WeTab · 双人账本",
+  "short_name": "WeTab",
   "description": "两个人一起记账：多币种自动换算、消费分类、拍照识别小票。",
   "start_url": "/",
   "scope": "/",

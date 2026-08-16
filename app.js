@@ -1,5 +1,5 @@
 /* ==========================================================================
-   Tally — 双人共享账本
+   WeTab — 双人共享账本
    零构建：原生 ES module。数据存 localStorage，汇率与小票识别走本地 Python 服务。
    ========================================================================== */
 
@@ -12,6 +12,14 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const icon = (name, cls = 'icon') =>
   `<svg class="${cls}" aria-hidden="true"><use href="#ph-${name}"></use></svg>`;
+
+/* 品牌标记：等号。两条等长横杠 = 两清 / 平分。
+   不放进 sprite，因为 sprite 是从 icons/ 里的 Phosphor 原文件重建的。 */
+const brand = (cls = 'icon') =>
+  `<svg class="${cls}" viewBox="0 0 256 256" aria-hidden="true">
+     <rect x="62" y="85" width="132" height="30" rx="15"/>
+     <rect x="62" y="141" width="132" height="30" rx="15"/>
+   </svg>`;
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -53,7 +61,7 @@ async function loadRates({ force = false } = {}) {
   const today = new Date().toISOString().slice(0, 10);
   if (!force) {
     try {
-      const c = JSON.parse(localStorage.getItem('tally.rates') || 'null');
+      const c = JSON.parse(localStorage.getItem('wetab.rates') || 'null');
       if (c && c.fetchedOn === today) { rates = c; return rates; }
     } catch {}
   }
@@ -64,7 +72,7 @@ async function loadRates({ force = false } = {}) {
     if (!data.rates || !data.rates.HKD) throw new Error('bad payload');
     data.rates.EUR = 1;
     rates = { ...data, stale: false, fetchedOn: today };
-    localStorage.setItem('tally.rates', JSON.stringify(rates));
+    localStorage.setItem('wetab.rates', JSON.stringify(rates));
   } catch (e) {
     console.warn('[rates] 使用离线汇率:', e.message);
     rates = { ...FALLBACK, error: true };
@@ -108,7 +116,8 @@ const catOf = (id) => CATS.find((c) => c.id === id) || CATS[CATS.length - 1];
 /* ==========================================================================
    状态
    ========================================================================== */
-const KEY = 'tally.state.v1';
+const KEY = 'wetab.state.v1';
+const LEGACY_KEY = 'tally.state.v1';   // 改名前的 key，读一次就迁移过来
 
 const dback = (back) => {
   const t = new Date();
@@ -151,7 +160,7 @@ let state = load();
 
 function load() {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = localStorage.getItem(KEY) || localStorage.getItem(LEGACY_KEY);
     if (!raw) return structuredClone(DEFAULT_STATE);
     const s = JSON.parse(raw);
     return { ...structuredClone(DEFAULT_STATE), ...s };
@@ -298,7 +307,7 @@ function go(r) { route = r; render(); window.scrollTo({ top: 0, behavior: reduce
    ========================================================================== */
 function render() {
   $('#topbar').innerHTML = `
-    <div class="wordmark">${icon('coins')}<span>Tally</span></div>
+    <div class="wordmark">${brand()}<span>WeTab</span></div>
     ${isSynced() ? `<span class="syncdot" data-sync-badge data-state="${syncStatus}">
       <i></i><span>${syncLabel()}</span></span>` : ''}`;
   $('#view').innerHTML =
@@ -325,7 +334,7 @@ const navBtn = (t) => `
 
 function renderRail() {
   $('#rail').innerHTML = `
-    <div class="wordmark">${icon('coins')}<span>Tally</span></div>
+    <div class="wordmark">${brand()}<span>WeTab</span></div>
     ${TABS.map((t) => `
       <button class="rail__btn" data-go="${t.id}" ${route === t.id ? 'aria-current="page"' : ''}>
         ${icon(t.icon)}<span>${t.label}</span>
@@ -901,7 +910,7 @@ function wireView() {
     const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `tally-${todayISO()}.json`;
+    a.download = `wetab-${todayISO()}.json`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   };
@@ -1483,7 +1492,8 @@ async function handleScan(file, host, draft, syncConverted, syncSplitHint) {
    冲突按 updatedAt 后写赢。删除是软删除，不然对方那台机器永远收不到「这条没了」。
    没网就把 dirty 标记留着，下次触发时再冲。
    ========================================================================== */
-const SYNC_KEY = 'tally.sync.v1';
+const SYNC_KEY = 'wetab.sync.v1';
+const LEGACY_SYNC_KEY = 'tally.sync.v1';
 
 let syncState = loadSync();           // { code, lastPull, lastOk }
 let syncStatus = 'off';               // off | idle | busy | error | offline
@@ -1492,7 +1502,10 @@ let syncTimer = null;
 let pollTimer = null;
 
 function loadSync() {
-  try { return JSON.parse(localStorage.getItem(SYNC_KEY)) || { code: null, lastPull: null, lastOk: null }; }
+  try {
+    const raw = localStorage.getItem(SYNC_KEY) || localStorage.getItem(LEGACY_SYNC_KEY);
+    return JSON.parse(raw) || { code: null, lastPull: null, lastOk: null };
+  }
   catch { return { code: null, lastPull: null, lastOk: null }; }
 }
 function saveSync() { localStorage.setItem(SYNC_KEY, JSON.stringify(syncState)); }

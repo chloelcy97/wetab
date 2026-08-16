@@ -1,7 +1,9 @@
-# Tally · 双人账本
+# WeTab · 双人账本
 
 两个人一起记账。多币种自动按实时汇率换算成港币 / 英镑 / 人民币，按分类拆开看，
 拍一张小票就能自动填好整笔账。
+
+标记是一个等号——两条等长的横杠，既是「两清」也是「平分」，正好是这个应用在做的唯一一件事。
 
 零构建：不需要 Node、不需要 npm、不需要 `pip install`。只要有 Python 3.8+。
 
@@ -108,24 +110,24 @@ export TALLY_MODEL=claude-sonnet-5
 ## 文件结构
 
 ```
-server.py                     Python 标准库服务：静态文件 + /api/rates + /api/scan
-public/
-  index.html                  外壳
-  styles.css                  设计系统（颜色 token、深色模式、全部组件）
+index.html                    外壳（在仓库根目录，GitHub Pages 直接托管）
+styles.css                    设计系统（颜色 token、深色模式、全部组件）
   app.js                      全部逻辑：状态、汇率换算、结算、三个视图、表单、识别、同步
-  config.js                   Supabase URL 与 publishable key
-  sprite.svg                  Phosphor 图标合成的 sprite
-  icons/                      原始 Phosphor SVG（改图标时从这里重新生成 sprite）
-  manifest.webmanifest        PWA 配置
-  icon-*.png                  主屏图标
+config.js                     Supabase 连接、小票识别端点、汇率地址
+sprite.svg                    Phosphor 图标合成的 sprite（由 icons/ 重建，不要手改）
+icons/                        原始 Phosphor SVG
+manifest.webmanifest          PWA 配置
+icon-*.png                    主屏图标（等号标记）
+server.py                     本地开发服务：静态文件 + /api/scan（线上不需要它）
 .claude/launch.json           给 Claude Code 用的启动配置
 supabase/schema.sql           建表 + RLS + 三个 RPC 函数，粘进 Supabase SQL Editor 跑
 ```
 
-改图标的话，把新的 Phosphor SVG 丢进 `public/icons/`，然后：
+品牌标记（等号）内联在 `app.js` 的 `brand()` 里，不在 sprite 中，所以重建 sprite 不会动到它。
+要加 Phosphor 图标的话，把 SVG 丢进 `icons/`，然后：
 
 ```bash
-python3 -c "import re,pathlib; d=pathlib.Path('public/icons'); out=['<svg xmlns=\"http://www.w3.org/2000/svg\" style=\"display:none\">']+[f'<symbol id=\"ph-{f.stem}\" viewBox=\"0 0 256 256\">'+re.sub(r'^<svg[^>]*>|</svg>\s*$','',f.read_text().strip())+'</symbol>' for f in sorted(d.glob('*.svg'))]+['</svg>']; pathlib.Path('public/sprite.svg').write_text('\n'.join(out))"
+python3 -c "import re,pathlib; d=pathlib.Path('icons'); out=['<svg xmlns=\"http://www.w3.org/2000/svg\" style=\"display:none\">']+[f'<symbol id=\"ph-{f.stem}\" viewBox=\"0 0 256 256\">'+re.sub(r'^<svg[^>]*>|</svg>\s*$','',f.read_text().strip())+'</symbol>' for f in sorted(d.glob('*.svg'))]+['</svg>']; pathlib.Path('sprite.svg').write_text('\n'.join(out))"
 ```
 
 ---
