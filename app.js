@@ -1708,7 +1708,7 @@ function startSyncLoop() {
    启动
    ========================================================================== */
 async function boot() {
-  const sprite = await fetch('/sprite.svg').then((r) => r.text());
+  const sprite = await fetch(new URL('./sprite.svg', import.meta.url)).then((r) => r.text());
   $('#sprite-host').innerHTML = sprite;
   if (isSynced()) syncStatus = 'idle';
   render();
