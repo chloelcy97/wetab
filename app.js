@@ -1,0 +1,1706 @@
+/* ==========================================================================
+   Tally — 双人共享账本
+   零构建：原生 ES module。数据存 localStorage，汇率与小票识别走本地 Python 服务。
+   ========================================================================== */
+
+import { SUPABASE_URL, SUPABASE_KEY, SYNC_AVAILABLE,
+         RATES_URL, scanUrl, SCAN_AVAILABLE } from './config.js';
+
+/* ---------- 小工具 ---------- */
+const $  = (sel, root = document) => root.querySelector(sel);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const icon = (name, cls = 'icon') =>
+  `<svg class="${cls}" aria-hidden="true"><use href="#ph-${name}"></use></svg>`;
+const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ==========================================================================
+   币种
+   ========================================================================== */
+const CURRENCIES = {
+  HKD: { sym: 'HK$', name: '港币',   dec: 2 },
+  GBP: { sym: '£',   name: '英镑',   dec: 2 },
+  CNY: { sym: '¥',   name: '人民币', dec: 2 },
+  USD: { sym: 'US$', name: '美元',   dec: 2 },
+  EUR: { sym: '€',   name: '欧元',   dec: 2 },
+  JPY: { sym: 'JP¥', name: '日元',   dec: 0 },
+  KRW: { sym: '₩',   name: '韩元',   dec: 0 },
+  SGD: { sym: 'S$',  name: '新币',   dec: 2 },
+  AUD: { sym: 'A$',  name: '澳元',   dec: 2 },
+  CAD: { sym: 'C$',  name: '加元',   dec: 2 },
+  CHF: { sym: 'CHF', name: '瑞郎',   dec: 2 },
+  NZD: { sym: 'NZ$', name: '纽元',   dec: 2 },
+  THB: { sym: '฿',   name: '泰铢',   dec: 2 },
+  MYR: { sym: 'RM',  name: '马币',   dec: 2 },
+  IDR: { sym: 'Rp',  name: '印尼盾', dec: 0 },
+  PHP: { sym: '₱',   name: '比索',   dec: 2 },
+  INR: { sym: '₹',   name: '卢比',   dec: 2 },
+};
+const DISPLAY = ['HKD', 'GBP', 'CNY'];
+
+/* 离线兜底汇率（以 EUR 为基准），仅在拿不到实时汇率时使用 */
+const FALLBACK = {
+  base: 'EUR', date: null, stale: true,
+  rates: { EUR: 1, HKD: 9.077, GBP: 0.8545, CNY: 7.7977, USD: 1.1567, JPY: 183.93,
+           KRW: 1583, SGD: 1.48, AUD: 1.76, CAD: 1.58, CHF: 0.93, NZD: 1.92,
+           THB: 37.3, MYR: 4.87, IDR: 18700, PHP: 65.5, INR: 101.2 },
+};
+
+let rates = FALLBACK;
+
+async function loadRates({ force = false } = {}) {
+  const today = new Date().toISOString().slice(0, 10);
+  if (!force) {
+    try {
+      const c = JSON.parse(localStorage.getItem('tally.rates') || 'null');
+      if (c && c.fetchedOn === today) { rates = c; return rates; }
+    } catch {}
+  }
+  try {
+    const res = await fetch(RATES_URL);
+    if (!res.ok) throw new Error('rates ' + res.status);
+    const data = await res.json();
+    if (!data.rates || !data.rates.HKD) throw new Error('bad payload');
+    data.rates.EUR = 1;
+    rates = { ...data, stale: false, fetchedOn: today };
+    localStorage.setItem('tally.rates', JSON.stringify(rates));
+  } catch (e) {
+    console.warn('[rates] 使用离线汇率:', e.message);
+    rates = { ...FALLBACK, error: true };
+  }
+  return rates;
+}
+
+function convert(amount, from, to) {
+  if (from === to) return amount;
+  const r = rates.rates || {};
+  const rf = from === rates.base ? 1 : r[from];
+  const rt = to === rates.base ? 1 : r[to];
+  if (!rf || !rt) return amount;
+  return (amount / rf) * rt;
+}
+
+function fmt(amount, cur, { sym = true } = {}) {
+  const meta = CURRENCIES[cur] || { sym: cur + ' ', dec: 2 };
+  const n = new Intl.NumberFormat('zh-Hans', {
+    minimumFractionDigits: meta.dec, maximumFractionDigits: meta.dec,
+  }).format(Math.abs(amount));
+  const sign = amount < 0 ? '-' : '';
+  return sym ? `${sign}${meta.sym}${n}` : `${sign}${n}`;
+}
+
+/* ==========================================================================
+   分类
+   ========================================================================== */
+const CATS = [
+  { id: 'food',    label: '吃饭', icon: 'fork-knife' },
+  { id: 'transit', label: '交通', icon: 'car' },
+  { id: 'stay',    label: '住宿', icon: 'bed' },
+  { id: 'shop',    label: '购物', icon: 'shopping-bag' },
+  { id: 'fun',     label: '娱乐', icon: 'confetti' },
+  { id: 'daily',   label: '日用', icon: 'basket' },
+  { id: 'health',  label: '医疗', icon: 'first-aid-kit' },
+  { id: 'other',   label: '其他', icon: 'dots-three-outline' },
+];
+const catOf = (id) => CATS.find((c) => c.id === id) || CATS[CATS.length - 1];
+
+/* ==========================================================================
+   状态
+   ========================================================================== */
+const KEY = 'tally.state.v1';
+
+const dback = (back) => {
+  const t = new Date();
+  t.setDate(t.getDate() - back);
+  return new Date(t.getTime() - t.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+};
+
+function seedTrips() {
+  return [
+    { id: 't-tokyo', name: '東京', from: dback(7), to: dback(5), currency: 'JPY' },
+    { id: 't-sz',    name: '深圳', from: dback(3), to: dback(2), currency: 'CNY' },
+  ];
+}
+
+function seed() {
+  const d = dback;
+  return [
+    { id: uid(), type: 'expense', payerId: 'a', amount: 486,  currency: 'HKD', cat: 'food',    merchant: '添好運 深水埗', note: '午飯',       date: d(0), split: 'even', tripId: null, createdAt: Date.now() - 1e5 },
+    { id: uid(), type: 'expense', payerId: 'b', amount: 128,  currency: 'HKD', cat: 'transit', merchant: '的士 尖沙咀→中環', note: '',       date: d(0), split: 'even', tripId: null, createdAt: Date.now() - 2e5 },
+    { id: uid(), type: 'expense', payerId: 'b', amount: 32.4, currency: 'GBP', cat: 'shop',    merchant: 'Boots',        note: '防曬同藥',   date: d(1), split: 'even', tripId: null, createdAt: Date.now() - 9e6 },
+    { id: uid(), type: 'expense', payerId: 'a', amount: 1240, currency: 'CNY', cat: 'stay',    merchant: '深圳灣民宿',     note: '兩晚',      date: d(2), split: 'even', tripId: 't-sz', createdAt: Date.now() - 2e7 },
+    { id: uid(), type: 'expense', payerId: 'a', amount: 268,  currency: 'HKD', cat: 'fun',     merchant: 'Broadway 戲院',  note: '',         date: d(3), split: 'even', tripId: null, createdAt: Date.now() - 3e7 },
+    { id: uid(), type: 'expense', payerId: 'b', amount: 74.5, currency: 'HKD', cat: 'daily',   merchant: '惠康超市',       note: '',         date: d(4), split: 'even', tripId: null, createdAt: Date.now() - 4e7 },
+    { id: uid(), type: 'expense', payerId: 'a', amount: 9800, currency: 'JPY', cat: 'food',    merchant: '鮨 銀座おのでら', note: '生日飯',   date: d(6), split: 'other', tripId: 't-tokyo', createdAt: Date.now() - 6e7 },
+  ];
+}
+
+const DEFAULT_STATE = {
+  members: [{ id: 'a', name: 'Chloe' }, { id: 'b', name: 'Wen' }],
+  display: 'HKD',
+  trips: seedTrips(),
+  expenses: seed(),
+  seeded: true,
+};
+
+/* 当前筛选：'all' 全部 · 'daily' 没归到项目的日常 · 其余是 trip id */
+let activeTrip = 'all';
+
+let state = load();
+
+function load() {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (!raw) return structuredClone(DEFAULT_STATE);
+    const s = JSON.parse(raw);
+    return { ...structuredClone(DEFAULT_STATE), ...s };
+  } catch {
+    return structuredClone(DEFAULT_STATE);
+  }
+}
+function save() {
+  try { localStorage.setItem(KEY, JSON.stringify(state)); }
+  catch (e) { toast('无法写入本地存储，可能处于浏览器隐私模式', 'warning-circle'); }
+}
+function setState(patch) { Object.assign(state, patch); save(); render(); }
+
+/* ==========================================================================
+   同步元数据
+   每条记录都带 updatedAt（谁后写谁赢）和 deleted（软删除，硬删对方收不到）。
+   dirty 是本地标记，不上传，push 成功后清掉。
+   ========================================================================== */
+function touch(rec) {
+  rec.updatedAt = new Date().toISOString();
+  rec.dirty = true;
+  return rec;
+}
+/** 改了成员名字 / 默认币种，下次 push 要带上 */
+function touchMeta() { state.metaDirty = true; }
+
+const liveExpenses = () => state.expenses.filter((e) => !e.deleted);
+const liveTrips    = () => state.trips.filter((t) => !t.deleted);
+
+const memberName = (id) => (state.members.find((m) => m.id === id) || {}).name || '?';
+const initial = (name) => (name || '?').trim().slice(0, 1).toUpperCase();
+
+/* ==========================================================================
+   结算计算
+   ========================================================================== */
+/** 返回 a 为 b 垫付的净额（显示币种）。负数表示 b 为 a 垫得多。 */
+function balance(list = liveExpenses(), cur = state.display) {
+  let net = 0;
+  for (const e of list) {
+    const v = convert(e.amount, e.currency, cur);
+    if (e.type === 'settle') {
+      // 补款：payer 把钱转给对方，直接抵消垫付
+      net += e.payerId === 'a' ? v : -v;
+      continue;
+    }
+    const otherShare = e.split === 'even' ? v / 2 : e.split === 'other' ? v : 0;
+    net += e.payerId === 'a' ? otherShare : -otherShare;
+  }
+  return net;
+}
+
+/** 每人实际承担的总额（显示币种），不含结算记录 */
+function personTotals(list, cur = state.display) {
+  const out = { a: 0, b: 0 };
+  for (const e of list) {
+    if (e.type === 'settle') continue;
+    const v = convert(e.amount, e.currency, cur);
+    const other = e.payerId === 'a' ? 'b' : 'a';
+    if (e.split === 'even') { out[e.payerId] += v / 2; out[other] += v / 2; }
+    else if (e.split === 'other') { out[other] += v; }
+    else { out[e.payerId] += v; }
+  }
+  return out;
+}
+
+const sorted = (list = liveExpenses()) => [...list].sort(
+  (x, y) => (y.date.localeCompare(x.date)) || (y.createdAt - x.createdAt));
+
+/* ==========================================================================
+   项目（一次旅行 / 一个城市 / 一段共同开销）
+   ========================================================================== */
+const tripOf = (id) => state.trips.find((t) => t.id === id) || null;
+
+/** 按当前筛选取记录 */
+function scopedExpenses(scope = activeTrip) {
+  const live = liveExpenses();
+  if (scope === 'all') return live;
+  if (scope === 'daily') return live.filter((e) => !e.tripId);
+  return live.filter((e) => e.tripId === scope);
+}
+
+/** 一个项目的汇总：总花费、每人份额、起止日期、笔数 */
+function tripSummary(trip, cur = state.display) {
+  const list = liveExpenses().filter((e) => e.tripId === trip.id);
+  const spend = list.filter((e) => e.type !== 'settle');
+  return {
+    trip,
+    count: spend.length,
+    total: spend.reduce((s, e) => s + convert(e.amount, e.currency, cur), 0),
+    totals: personTotals(list, cur),
+    net: balance(list, cur),
+    days: (trip.from && trip.to)
+      ? Math.round((new Date(trip.to) - new Date(trip.from)) / 86400000) + 1 : 0,
+  };
+}
+
+/** 记账时按日期猜项目：日期落在某个项目区间内就自动归进去 */
+function guessTrip(dateISO) {
+  if (activeTrip !== 'all' && activeTrip !== 'daily') return activeTrip;
+  const hit = liveTrips().find((t) => t.from && t.to && dateISO >= t.from && dateISO <= t.to);
+  return hit ? hit.id : null;
+}
+
+const tripRange = (t) => {
+  if (!t.from || !t.to) return '';
+  const f = (iso) => `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}`;
+  return t.from === t.to ? f(t.from) : `${f(t.from)} - ${f(t.to)}`;
+};
+
+/* ==========================================================================
+   日期
+   ========================================================================== */
+const WD = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+function dayLabel(iso) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const d = new Date(iso + 'T00:00:00');
+  const diff = Math.round((today - d) / 86400000);
+  if (diff === 0) return '今天';
+  if (diff === 1) return '昨天';
+  const y = d.getFullYear() !== today.getFullYear() ? `${d.getFullYear()}年` : '';
+  return `${y}${d.getMonth() + 1}月${d.getDate()}日 ${WD[d.getDay()]}`;
+}
+const todayISO = () => {
+  const t = new Date();
+  return new Date(t.getTime() - t.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+};
+
+/* ==========================================================================
+   路由
+   ========================================================================== */
+let route = 'ledger';
+let statsMonth = todayISO().slice(0, 7);
+
+const TABS = [
+  { id: 'ledger',   label: '账本', icon: 'receipt' },
+  { id: 'stats',    label: '统计', icon: 'chart-pie-slice' },
+  { id: 'settings', label: '设置', icon: 'gear' },
+];
+
+function go(r) { route = r; render(); window.scrollTo({ top: 0, behavior: reduceMotion() ? 'auto' : 'smooth' }); }
+
+/* ==========================================================================
+   渲染
+   ========================================================================== */
+function render() {
+  $('#topbar').innerHTML = `
+    <div class="wordmark">${icon('coins')}<span>Tally</span></div>
+    ${isSynced() ? `<span class="syncdot" data-sync-badge data-state="${syncStatus}">
+      <i></i><span>${syncLabel()}</span></span>` : ''}`;
+  $('#view').innerHTML =
+    route === 'ledger' ? viewLedger() :
+    route === 'stats'  ? viewStats()  : viewSettings();
+  renderNav();
+  renderRail();
+  wireView();
+  animateRows = false;
+}
+
+function renderNav() {
+  $('#nav').innerHTML = `
+    <div class="nav__inner">
+      ${TABS.slice(0, 1).map(navBtn).join('')}
+      <button class="fab" data-add title="记一笔" aria-label="记一笔">${icon('plus')}</button>
+      ${TABS.slice(1).map(navBtn).join('')}
+    </div>`;
+}
+const navBtn = (t) => `
+  <button class="nav__btn" data-go="${t.id}" ${route === t.id ? 'aria-current="page"' : ''}>
+    ${icon(t.icon)}<span>${t.label}</span>
+  </button>`;
+
+function renderRail() {
+  $('#rail').innerHTML = `
+    <div class="wordmark">${icon('coins')}<span>Tally</span></div>
+    ${TABS.map((t) => `
+      <button class="rail__btn" data-go="${t.id}" ${route === t.id ? 'aria-current="page"' : ''}>
+        ${icon(t.icon)}<span>${t.label}</span>
+      </button>`).join('')}
+    <button class="btn btn--primary" data-add>${icon('plus')}记一笔</button>
+    <div class="rail__foot">
+      ${isSynced()
+        ? `<span class="syncdot" data-sync-badge data-state="${syncStatus}"><i></i><span>${syncLabel()}</span></span>`
+        : `<div class="footnote">数据仅保存在这台设备的浏览器中。</div>`}
+    </div>`;
+}
+
+/* ---------- 账本 ---------- */
+function viewLedger() {
+  const scope = activeTrip;
+  const list = sorted(scopedExpenses());
+  const net = balance(list);
+  const settled = Math.abs(net) < 0.005;
+  const [A, B] = state.members;
+  const fronted = net > 0 ? A : B;   // 垫得多的那个
+  const owes    = net > 0 ? B : A;   // 要补钱的那个
+  const totals = personTotals(list);
+  const trip = tripOf(scope);
+
+  const groups = [];
+  for (const e of list) {
+    const g = groups[groups.length - 1];
+    if (g && g.date === e.date) g.items.push(e);
+    else groups.push({ date: e.date, items: [e] });
+  }
+
+  const scopeLabel = scope === 'all' ? '全部' : scope === 'daily' ? '日常' : trip ? trip.name : '全部';
+
+  const side = `
+    <div class="ledger-grid__side">
+      <section class="balance ${settled ? 'balance--settled' : ''}">
+        <div class="balance__label">
+          ${icon(settled ? 'scales' : 'hand-coins')}
+          <span>${!list.length ? '尚无账目'
+            : settled ? '账目已两清'
+            : `${esc(owes.name)} 转给 ${esc(fronted.name)}`}</span>
+        </div>
+        <div class="balance__amount num">
+          ${fmt(settled ? 0 : Math.abs(net), state.display, { sym: false })}
+          <span class="cur">${state.display}</span>
+        </div>
+        ${settled || !list.length ? '' :
+          `<p class="balance__sub">${esc(fronted.name)} 已垫付这些，转账后即两清</p>`}
+        <div class="balance__split">
+          ${who('a', A, totals.a)}
+          ${who('b', B, totals.b)}
+        </div>
+        ${settled ? '' : `
+          <button class="btn btn--ghost btn--block" data-settle style="margin-top:16px">
+            ${icon('arrow-u-down-left')}记录一次补款
+          </button>`}
+      </section>
+
+      <div>
+        <div class="seg" role="tablist" aria-label="显示币种">
+          ${DISPLAY.map((c) => `
+            <button class="seg__btn" role="tab" data-cur="${c}"
+              aria-selected="${state.display === c}">${c}</button>`).join('')}
+        </div>
+        <p class="rate-note">
+          ${icon(rates.stale || rates.error ? 'warning-circle' : 'arrows-clockwise')}
+          <span>${rates.stale || rates.error
+            ? '未能获取实时汇率，正在使用离线数据'
+            : `欧洲央行汇率 · ${rates.date || '今日'}`}</span>
+          <button data-refresh-rates>更新</button>
+        </p>
+      </div>
+    </div>`;
+
+  const tripBar = `
+    <div class="chips" role="tablist" aria-label="项目">
+      <button class="chip" role="tab" data-scope="all" aria-selected="${scope === 'all'}">全部</button>
+      <button class="chip" role="tab" data-scope="daily" aria-selected="${scope === 'daily'}">
+        ${icon('house-line')}日常
+      </button>
+      ${state.trips.map((t) => `
+        <button class="chip" role="tab" data-scope="${t.id}" aria-selected="${scope === t.id}">
+          ${icon('airplane-tilt')}${esc(t.name)}
+        </button>`).join('')}
+      <button class="chip chip--new" data-new-trip>${icon('plus')}新项目</button>
+    </div>`;
+
+  const tripHead = trip ? `
+    <div class="triphead">
+      <div class="triphead__main">
+        <h2>${esc(trip.name)}</h2>
+        <p>${tripRange(trip) ? tripRange(trip) + ' · ' : ''}${list.filter((e) => e.type !== 'settle').length} 笔${
+          trip.currency ? ' · 默认 ' + trip.currency : ''}</p>
+      </div>
+      <button class="iconbtn" data-edit-trip="${trip.id}" aria-label="编辑项目">${icon('pencil-simple')}</button>
+    </div>` : '';
+
+  const emptyCopy = scope === 'all'
+    ? { h: '还没有记录', p: '拍一张小票，或手动填一笔。两个人的开销都记下来，账才算得准。' }
+    : scope === 'daily'
+    ? { h: '日常暂无记录', p: '未归入任何项目的开销，都会出现在这里。' }
+    : { h: `${trip ? trip.name : '这个项目'}暂无记录`, p: '这次的开销都记在这里，回来后就能看到一共花了多少、谁垫得更多。' };
+
+  const body = list.length === 0 ? `
+    <div class="empty">
+      ${icon('receipt')}
+      <h3>${esc(emptyCopy.h)}</h3>
+      <p>${esc(emptyCopy.p)}</p>
+      <button class="btn btn--primary" data-add>${
+        SCAN_AVAILABLE() ? icon('camera') + '拍小票记账' : icon('plus') + '记第一笔'}</button>
+    </div>` : `
+    <div class="sec">
+      <h2>${trip ? '本次开销' : scopeLabel === '全部' ? '近期开销' : '日常开销'}</h2>
+      <span class="sec__aside">共 ${list.length} 笔</span>
+    </div>
+    ${groups.map(dayGroup).join('')}`;
+
+  return tripBar + tripHead + `<div class="ledger-grid">${side}<div>${body}</div></div>`;
+}
+
+const who = (slot, m, sum) => `
+  <div class="who">
+    <div class="avatar avatar--${slot}">${esc(initial(m.name))}</div>
+    <div style="min-width:0">
+      <div class="who__name">${esc(m.name)} 花费</div>
+      <div class="who__sum num">${fmt(sum, state.display)}</div>
+    </div>
+  </div>`;
+
+function dayGroup(g) {
+  const daySum = g.items.reduce((s, e) =>
+    e.type === 'settle' ? s : s + convert(e.amount, e.currency, state.display), 0);
+  return `
+    <section class="daygroup">
+      <div class="daygroup__head">
+        <span>${dayLabel(g.date)}</span>
+        <span class="num">${fmt(daySum, state.display)}</span>
+      </div>
+      <div class="rows">${g.items.map(rowHTML).join('')}</div>
+    </section>`;
+}
+
+/* 进场动画只跑首屏那一次；之后切币种、增删记录都不再重播 */
+let animateRows = true;
+
+function rowHTML(e, i = 0) {
+  const delay = (animateRows && !reduceMotion())
+    ? `class="row row--in" style="animation-delay:${Math.min(i * 35, 280)}ms"`
+    : 'class="row"';
+  const payer = memberName(e.payerId);
+  const shown = convert(e.amount, e.currency, state.display);
+  const orig = e.currency !== state.display ? `<div class="sub num">${fmt(e.amount, e.currency)}</div>` : '';
+
+  const t = e.tripId ? tripOf(e.tripId) : null;
+  const tripTag = (activeTrip === 'all' && t)
+    ? `<i class="dot"></i><span class="row__trip">${icon('airplane-tilt')}${esc(t.name)}</span>` : '';
+
+  if (e.type === 'settle') {
+    const to = memberName(e.payerId === 'a' ? 'b' : 'a');
+    return `
+      <button ${delay} data-open="${e.id}">
+        <div class="tile tile--accent">${icon('arrow-u-down-left')}</div>
+        <div class="row__body">
+          <div class="row__title">补款 · ${esc(payer)} 转给 ${esc(to)}</div>
+          <div class="row__meta"><span>不计入统计</span>${tripTag}</div>
+        </div>
+        <div class="row__amt"><div class="big num">${fmt(shown, state.display)}</div>${orig}</div>
+      </button>`;
+  }
+
+  const c = catOf(e.cat);
+  const splitTxt = e.split === 'even' ? 'AA' : e.split === 'other'
+    ? `${esc(memberName(e.payerId === 'a' ? 'b' : 'a'))} 全付`
+    : `${esc(payer)} 请客`;
+  return `
+    <button ${delay} data-open="${e.id}">
+      <div class="tile">${icon(c.icon)}</div>
+      <div class="row__body">
+        <div class="row__title">${esc(e.merchant || c.label)}</div>
+        <div class="row__meta">
+          <span>${esc(payer)} 付</span><i class="dot"></i><span>${splitTxt}</span>${tripTag}
+          ${e.note ? `<i class="dot"></i><span class="row__note">${esc(e.note)}</span>` : ''}
+        </div>
+      </div>
+      <div class="row__amt"><div class="big num">${fmt(shown, state.display)}</div>${orig}</div>
+    </button>`;
+}
+
+/* ---------- 统计 ---------- */
+function viewStats() {
+  const inMonth = liveExpenses().filter((e) => e.type !== 'settle' && e.date.startsWith(statsMonth));
+  const total = inMonth.reduce((s, e) => s + convert(e.amount, e.currency, state.display), 0);
+  const totals = personTotals(inMonth);
+
+  const byCat = CATS.map((c) => ({
+    ...c,
+    sum: inMonth.filter((e) => e.cat === c.id)
+      .reduce((s, e) => s + convert(e.amount, e.currency, state.display), 0),
+  })).filter((c) => c.sum > 0).sort((x, y) => y.sum - x.sum);
+
+  const max = byCat[0]?.sum || 1;
+  const [y, m] = statsMonth.split('-').map(Number);
+  const atCurrent = statsMonth >= todayISO().slice(0, 7);
+
+  const head = `
+    <div class="sec">
+      <h2>统计</h2>
+      <div class="monthnav">
+        <button data-month="-1" aria-label="上个月">${icon('caret-left')}</button>
+        <span class="monthnav__label">${y} 年 ${m} 月</span>
+        <button data-month="1" aria-label="下个月" ${atCurrent ? 'disabled' : ''}>${icon('caret-right')}</button>
+      </div>
+    </div>`;
+
+  if (!inMonth.length) return head + `
+    <div class="empty">
+      ${icon('chart-pie-slice')}
+      <h3>本月暂无记录</h3>
+      <p>记录几笔之后，这里会按分类拆开，也会显示两个人各自花了多少。</p>
+    </div>
+    ${tripsSection()}`;
+
+  return head + `
+    <section class="balance" style="margin-bottom:20px">
+      <div class="balance__label">${icon('wallet')}<span>本月共支出</span></div>
+      <div class="balance__amount num">${fmt(total, state.display, { sym: false })}<span class="cur">${state.display}</span></div>
+      <div class="balance__split">
+        ${who('a', state.members[0], totals.a)}
+        ${who('b', state.members[1], totals.b)}
+      </div>
+    </section>
+
+    <div class="sec"><h2>按分类</h2><span class="sec__aside">${byCat.length} 类</span></div>
+    <div class="statcard">
+      ${byCat.map((c, i) => `
+        <div class="catline">
+          <div class="catline__top">
+            ${icon(c.icon)}
+            <span class="catline__name">${c.label}</span>
+            <span class="catline__pct num">${Math.round((c.sum / total) * 100)}%</span>
+            <span class="catline__val num">${fmt(c.sum, state.display)}</span>
+          </div>
+          <div class="bar" style="width:${Math.max((c.sum / max) * 100, 2)}%;animation-delay:${i * 60}ms"></div>
+        </div>`).join('')}
+    </div>
+
+    ${tripsSection()}`;
+}
+
+/* 「按项目」看的是每个项目的全部花费，不受上面的月份影响 */
+function tripsSection() {
+  if (!liveTrips().length) return `
+    <div class="sec"><h2>按项目</h2></div>
+    <div class="empty">
+      ${icon('airplane-tilt')}
+      <h3>还没有项目</h3>
+      <p>每次出行建一个项目，回来后就能看到这次一共花了多少、两个人各自花了多少。</p>
+      <button class="btn btn--primary" data-new-trip>${icon('plus')}新建项目</button>
+    </div>`;
+
+  const sums = liveTrips().map((t) => tripSummary(t))
+    .sort((x, y) => (y.trip.from || '').localeCompare(x.trip.from || ''));
+  const max = Math.max(...sums.map((s) => s.total), 1);
+
+  return `
+    <div class="sec">
+      <h2>按项目</h2>
+      <button class="btn btn--quiet" data-new-trip>${icon('plus')}新建</button>
+    </div>
+    <div class="tripgrid">
+      ${sums.map((s, i) => `
+        <button class="tripcard" data-open-trip="${s.trip.id}">
+          <div class="tripcard__top">
+            <span class="tripcard__name">${icon('airplane-tilt')}${esc(s.trip.name)}</span>
+            <span class="tripcard__meta">${tripRange(s.trip) || '未设日期'}${
+              s.days ? ' · ' + s.days + ' 天' : ''}</span>
+          </div>
+          <div class="tripcard__amt num">${fmt(s.total, state.display, { sym: false })}
+            <span class="cur">${state.display}</span></div>
+          <div class="bar" style="width:${Math.max((s.total / max) * 100, 2)}%;animation-delay:${i * 70}ms"></div>
+          <div class="tripcard__foot">
+            <span>${esc(state.members[0].name)} ${fmt(s.totals.a, state.display)}</span>
+            <span>${esc(state.members[1].name)} ${fmt(s.totals.b, state.display)}</span>
+          </div>
+          ${Math.abs(s.net) < 0.005 ? '' : `
+            <div class="tripcard__net">${
+              esc(s.net > 0 ? state.members[1].name : state.members[0].name)
+            } 转 ${fmt(Math.abs(s.net), state.display)} 即可结清</div>`}
+        </button>`).join('')}
+    </div>`;
+}
+
+/* ---------- 设置 ---------- */
+function viewSettings() {
+  return `
+    <div class="sec"><h2>设置</h2></div>
+
+    <div class="card">
+      ${state.members.map((m, i) => `
+        <div class="listrow">
+          <div class="avatar avatar--${i === 0 ? 'a' : 'b'} avatar--sm">${esc(initial(m.name))}</div>
+          <input class="nameinput" data-name="${m.id}" value="${esc(m.name)}"
+                 maxlength="12" aria-label="成员 ${i + 1} 的名字">
+        </div>`).join('')}
+    </div>
+    <p class="footnote">修改后会立即反映到账本和统计中。</p>
+
+    <div class="sec">
+      <h2>项目</h2>
+      <button class="btn btn--quiet" data-new-trip>${icon('plus')}新建</button>
+    </div>
+    ${liveTrips().length ? `
+      <div class="card">
+        ${liveTrips().map((t) => `
+          <button class="listrow" data-edit-trip="${t.id}">
+            ${icon('airplane-tilt')}
+            <span class="listrow__label">${esc(t.name)}</span>
+            <span class="listrow__value">${
+              liveExpenses().filter((e) => e.tripId === t.id && e.type !== 'settle').length} 笔</span>
+            ${icon('caret-right')}
+          </button>`).join('')}
+      </div>` : `
+      <p class="footnote" style="padding-top:0">还没有项目。出行前建一个，这次的开销就会单独结算。</p>`}
+
+    <div class="sec"><h2>显示币种</h2></div>
+    <div class="seg" role="tablist" aria-label="默认显示币种">
+      ${DISPLAY.map((c) => `
+        <button class="seg__btn" role="tab" data-cur="${c}" aria-selected="${state.display === c}">
+          ${c} · ${CURRENCIES[c].name}
+        </button>`).join('')}
+    </div>
+    <p class="footnote">这项只影响这台设备。对方可以选自己习惯的币种，两边看到的是同一笔账。</p>
+
+    ${SYNC_AVAILABLE ? syncPanel() : ''}
+
+    <div class="sec"><h2>数据</h2></div>
+    <div class="card">
+      <button class="listrow" data-refresh-rates>
+        ${icon('arrows-clockwise')}
+        <span class="listrow__label">立即更新汇率</span>
+        <span class="listrow__value num">${rates.date || '离线'}</span>
+      </button>
+      <button class="listrow" data-export>
+        ${icon('note-pencil')}
+        <span class="listrow__label">导出为 JSON</span>
+        <span class="listrow__value">${liveExpenses().length} 笔</span>
+      </button>
+      <button class="listrow" data-clear>
+        ${icon('trash')}
+        <span class="listrow__label">清空所有记录</span>
+      </button>
+    </div>
+    <p class="footnote">
+      账目保存在本机浏览器的 localStorage。小票照片仅在识别的那一次发送给模型，识别完成后即丢弃，不会存入账本。
+    </p>`;
+}
+
+
+/* ---------- 同步面板 ---------- */
+function syncPanel() {
+  if (!isSynced()) return `
+    <div class="sec"><h2>同步</h2></div>
+    <div class="card">
+      <button class="listrow" data-sync-create>
+        ${icon('users')}
+        <span class="listrow__label">创建共享账本</span>
+        ${icon('caret-right')}
+      </button>
+      <button class="listrow" data-sync-join>
+        ${icon('user-plus')}
+        <span class="listrow__label">用账本码加入</span>
+        ${icon('caret-right')}
+      </button>
+    </div>
+    <p class="footnote">
+      目前账目仅保存在这台设备上。创建后会得到一个账本码，发给对方，两个人记的账就会合并到一起。
+    </p>`;
+
+  return `
+    <div class="sec"><h2>同步</h2></div>
+    <div class="card">
+      <div class="listrow">
+        <span class="syncdot" data-sync-badge data-state="${syncStatus}"><i></i><span>${syncLabel()}</span></span>
+      </div>
+      <div class="listrow codeRow">
+        <div style="flex:1;min-width:0">
+          <div class="label" style="margin-bottom:5px">账本码</div>
+          <div class="codeval num">${esc(syncState.code)}</div>
+        </div>
+        <button class="btn btn--ghost" data-copy-code style="height:38px;padding:0 16px">
+          ${icon('check')}复制
+        </button>
+      </div>
+      <button class="listrow" data-sync-now>
+        ${icon('arrows-clockwise')}
+        <span class="listrow__label">立即同步</span>
+        <span class="listrow__value" data-sync-status>${syncLabel()}</span>
+      </button>
+      <button class="listrow" data-sync-off>
+        ${icon('x')}
+        <span class="listrow__label">断开同步</span>
+      </button>
+    </div>
+    <p class="footnote">
+      把账本码发给对方，对方在自己的设备上选择「用账本码加入」即可。账本码相当于钥匙，请勿公开分享。
+    </p>`;
+}
+
+/* ---------- 创建 / 加入 ---------- */
+function openSyncCreate() {
+  const n = liveExpenses().length;
+  openSheet({
+    title: '创建共享账本',
+    body: `
+      <div class="alert">${icon('users')}
+        <span>系统会生成一个账本码。对方输入后即可加入，两边记的账会自动合并。</span></div>
+      <p style="font-size:14px;color:var(--ink-2);line-height:1.65;margin-top:16px">
+        这台设备上现有的 ${n} 笔记录${liveTrips().length ? ` 和 ${liveTrips().length} 个项目` : ''}会一并上传，作为共享账本的起点。
+      </p>
+      <p class="hint" style="margin-top:10px">
+        对方加入时，其本机记录会被替换为这个账本的内容。因此建议由记录更完整的一方来创建。
+      </p>`,
+    foot: `<button class="btn btn--ghost" data-close>取消</button>
+           <button class="btn btn--primary" data-ok>${icon('check')}创建</button>`,
+    onMount: (host) => {
+      host.querySelector('[data-ok]').onclick = async (ev) => {
+        const b = ev.currentTarget;
+        b.disabled = true; b.textContent = '创建中…';
+        try {
+          const code = await createLedger();
+          closeSheetNow(); render();
+          openSyncCode(code);
+        } catch (err) {
+          b.disabled = false; b.innerHTML = '创建';
+          toast(`创建失败：${err.message}`, 'warning-circle');
+        }
+      };
+    },
+  });
+}
+
+function openSyncCode(code) {
+  openSheet({
+    title: '账本已创建',
+    body: `
+      <p style="font-size:14px;color:var(--ink-2);line-height:1.65">
+        把下面的账本码发给对方，对方在自己的设备上选择「用账本码加入」并输入即可。
+      </p>
+      <div class="codebig num">${esc(code)}</div>
+      <button class="btn btn--ghost btn--block" data-copy-code>${icon('check')}复制账本码</button>
+      <p class="hint" style="margin-top:14px">
+        账本码相当于钥匙，持有它的人即可查看账目。在设置页中随时可以找到。
+      </p>`,
+    foot: `<button class="btn btn--primary" data-close>好的</button>`,
+    onMount: (host) => {
+      host.querySelector('[data-copy-code]').onclick = () => copyCode(code);
+    },
+  });
+}
+
+function openSyncJoin() {
+  const n = liveExpenses().length;
+  openSheet({
+    title: '用账本码加入',
+    body: `
+      <div class="field">
+        <label class="label" for="jn-code">账本码</label>
+        <input class="input num" id="jn-code" placeholder="12 位字母与数字"
+               autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="20">
+        <p class="err" id="jn-err" hidden></p>
+      </div>
+      ${n ? `
+        <div class="alert" style="margin-top:16px">${icon('warning-circle')}
+          <span>这台设备上现有的 ${n} 笔记录，会被替换为账本中的内容。若这些记录尚未同步，请先完成同步再加入。</span>
+        </div>` : ''}`,
+    foot: `<button class="btn btn--ghost" data-close>取消</button>
+           <button class="btn btn--primary" data-ok>${icon('check')}加入</button>`,
+    onMount: (host) => {
+      const input = host.querySelector('#jn-code');
+      const err = host.querySelector('#jn-err');
+      const go = async (ev) => {
+        const b = host.querySelector('[data-ok]');
+        const v = input.value.trim();
+        if (v.length < 6) { err.textContent = '账本码不完整'; err.hidden = false; return; }
+        err.hidden = true; b.disabled = true;
+        try {
+          await joinLedger(v);
+          closeSheetNow(); render(); startSyncLoop();
+          toast('已加入，账目同步完成', 'check');
+        } catch (e2) {
+          b.disabled = false;
+          err.textContent = e2.pgcode === 'P0002' ? '账本码有误，请再核对一次' : `加入失败：${e2.message}`;
+          err.hidden = false;
+          input.focus();
+        }
+      };
+      host.querySelector('[data-ok]').onclick = go;
+      input.onkeydown = (ev) => { if (ev.key === 'Enter') go(ev); };
+      setTimeout(() => input.focus(), 60);
+    },
+  });
+}
+
+async function copyCode(code) {
+  try {
+    await navigator.clipboard.writeText(code);
+    toast('账本码已复制', 'check');
+  } catch {
+    toast('无法自动复制，请手动选中', 'warning-circle');
+  }
+}
+
+/* ==========================================================================
+   事件绑定
+   ========================================================================== */
+function wireView() {
+  document.querySelectorAll('[data-go]').forEach((el) =>
+    el.onclick = () => go(el.dataset.go));
+  document.querySelectorAll('[data-add]').forEach((el) =>
+    el.onclick = () => openAdd());
+  document.querySelectorAll('[data-cur]').forEach((el) =>
+    el.onclick = () => setState({ display: el.dataset.cur }));
+  document.querySelectorAll('[data-refresh-rates]').forEach((el) =>
+    el.onclick = async () => {
+      el.disabled = true;
+      await loadRates({ force: true });
+      render();
+      toast(rates.error ? '未能获取实时汇率，仍在使用离线数据' : '汇率已更新',
+            rates.error ? 'warning-circle' : 'check');
+    });
+  document.querySelectorAll('[data-open]').forEach((el) =>
+    el.onclick = () => openAdd(state.expenses.find((e) => e.id === el.dataset.open)));
+  document.querySelectorAll('[data-month]').forEach((el) =>
+    el.onclick = () => {
+      const [y, m] = statsMonth.split('-').map(Number);
+      const d = new Date(y, m - 1 + Number(el.dataset.month), 1);
+      statsMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      render();
+    });
+  document.querySelectorAll('[data-name]').forEach((el) =>
+    el.onchange = () => {
+      const m = state.members.find((x) => x.id === el.dataset.name);
+      m.name = el.value.trim() || m.name;
+      touchMeta(); save(); render(); queueSync();
+    });
+
+  const on = (sel, fn) => document.querySelectorAll(sel).forEach((el) => el.onclick = () => fn(el));
+  on('[data-sync-create]', openSyncCreate);
+  on('[data-sync-join]', openSyncJoin);
+  on('[data-sync-now]', () => syncNow({ manual: true }));
+  on('[data-copy-code]', () => copyCode(syncState.code));
+  on('[data-sync-off]', () => confirmSheet({
+    title: '断开同步',
+    body: '这台设备将不再与对方同步，账目会原样保留在本机。对方的账本不受影响，之后用同一个账本码可以重新连接。',
+    danger: '断开',
+    onOk: () => { disconnectSync(); toast('已断开同步', 'check'); },
+  }));
+
+  document.querySelectorAll('[data-scope]').forEach((el) =>
+    el.onclick = () => { activeTrip = el.dataset.scope; animateRows = true; render(); });
+  document.querySelectorAll('[data-new-trip]').forEach((el) =>
+    el.onclick = () => openTrip());
+  document.querySelectorAll('[data-edit-trip]').forEach((el) =>
+    el.onclick = () => openTrip(tripOf(el.dataset.editTrip)));
+  document.querySelectorAll('[data-open-trip]').forEach((el) =>
+    el.onclick = () => { activeTrip = el.dataset.openTrip; animateRows = true; go('ledger'); });
+
+  const settle = $('[data-settle]');
+  if (settle) settle.onclick = openSettle;
+
+  const exp = $('[data-export]');
+  if (exp) exp.onclick = () => {
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `tally-${todayISO()}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+
+  const clr = $('[data-clear]');
+  if (clr) clr.onclick = () => confirmSheet({
+    title: '清空所有记录',
+    body: '账本中的 ' + liveExpenses().length + ' 笔记录将被删除，且无法恢复。成员名称、项目与币种设置会保留。',
+    danger: '确认清空',
+    onOk: () => {
+      state.expenses.forEach((e) => { if (!e.deleted) { e.deleted = true; touch(e); } });
+      state.seeded = false;
+      save(); render(); queueSync(); toast('已清空', 'check');
+    },
+  });
+}
+
+/* ==========================================================================
+   Toast
+   ========================================================================== */
+let toastTimer;
+function toast(msg, ic = 'check') {
+  clearTimeout(toastTimer);
+  $('#toast-host').innerHTML = `<div class="toast">${icon(ic)}<span>${esc(msg)}</span></div>`;
+  toastTimer = setTimeout(() => ($('#toast-host').innerHTML = ''), 2600);
+}
+
+/* ==========================================================================
+   Sheet 基础设施
+   ========================================================================== */
+let closeSheet = null;
+
+function openSheet({ title, body, foot, onMount }) {
+  closeSheetNow();
+  const host = $('#overlay');
+  host.innerHTML = `
+    <div class="scrim" data-close></div>
+    <div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+      <div class="sheet__head">
+        <span class="sheet__title">${esc(title)}</span>
+        <button class="iconbtn" data-close aria-label="关闭">${icon('x')}</button>
+      </div>
+      <div class="sheet__body">${body}</div>
+      ${foot ? `<div class="sheet__foot">${foot}</div>` : ''}
+    </div>`;
+  document.body.style.overflow = 'hidden';
+  host.querySelectorAll('[data-close]').forEach((el) => el.onclick = closeSheetNow);
+
+  const onKey = (ev) => { if (ev.key === 'Escape') closeSheetNow(); };
+  document.addEventListener('keydown', onKey);
+  closeSheet = () => {
+    document.removeEventListener('keydown', onKey);
+    host.innerHTML = '';
+    document.body.style.overflow = '';
+    closeSheet = null;
+  };
+  onMount?.(host);
+  host.querySelector('input, select, button:not([data-close])')?.focus?.();
+}
+function closeSheetNow() { closeSheet?.(); }
+
+function confirmSheet({ title, body, danger, onOk }) {
+  openSheet({
+    title,
+    body: `<p style="font-size:14px;color:var(--ink-2);line-height:1.6">${esc(body)}</p>`,
+    foot: `<button class="btn btn--ghost" data-close>取消</button>
+           <button class="btn btn--primary" data-ok>${esc(danger)}</button>`,
+    onMount: (host) => {
+      host.querySelector('[data-ok]').onclick = () => { closeSheetNow(); onOk(); };
+    },
+  });
+}
+
+/* ==========================================================================
+   结清
+   ========================================================================== */
+function openSettle() {
+  const scoped = scopedExpenses();
+  const net = balance(scoped);
+  const from = net > 0 ? state.members[1] : state.members[0];
+  const to   = net > 0 ? state.members[0] : state.members[1];
+  const amt  = Math.abs(net);
+  const trip = tripOf(activeTrip);
+
+  openSheet({
+    title: '记一笔补款',
+    body: `
+      <div class="alert">${icon('scales')}
+        <span>记录这次转账后，垫付的差额即被抵销。补款不计为消费，也不进入分类统计${
+          trip ? '，仅结算「' + esc(trip.name) + '」这个项目' : ''}。</span></div>
+      <div class="field" style="margin-top:18px">
+        <label class="label" for="st-amt">${esc(from.name)} 付给 ${esc(to.name)}</label>
+        <div class="amountbox">
+          <input id="st-amt" class="num" type="text" inputmode="decimal"
+                 value="${amt.toFixed(CURRENCIES[state.display].dec)}">
+          <select id="st-cur">${DISPLAY.map((c) =>
+            `<option value="${c}" ${c === state.display ? 'selected' : ''}>${c}</option>`).join('')}</select>
+        </div>
+        <p class="hint">默认为当前差额全数，也可以只补其中一部分。</p>
+      </div>`,
+    foot: `<button class="btn btn--ghost" data-close>取消</button>
+           <button class="btn btn--primary" data-ok>${icon('check')}确认</button>`,
+    onMount: (host) => {
+      host.querySelector('[data-ok]').onclick = () => {
+        const v = parseFloat(host.querySelector('#st-amt').value);
+        if (!(v > 0)) { toast('金额需大于 0', 'warning-circle'); return; }
+        state.expenses.push({
+          id: uid(), type: 'settle', payerId: from.id, amount: v,
+          currency: host.querySelector('#st-cur').value,
+          cat: 'other', merchant: '', note: '', date: todayISO(),
+          split: 'payer', tripId: trip ? trip.id : null, createdAt: Date.now(),
+          updatedAt: new Date().toISOString(), dirty: true,
+        });
+        save(); closeSheetNow(); render(); queueSync();
+        toast('已记录这笔补款', 'check');
+      };
+    },
+  });
+}
+
+
+/* ==========================================================================
+   项目：新建 / 编辑
+   ========================================================================== */
+function openTrip(existing) {
+  const editing = !!existing;
+  const t = editing ? { ...existing }
+    : { id: uid(), name: '', from: todayISO(), to: todayISO(), currency: '' };
+
+  openSheet({
+    title: editing ? '编辑项目' : '新建项目',
+    body: `
+      <div class="alert">${icon('airplane-tilt')}
+        <span>一次旅行、一座城市、一段共同开销，都可以单独建一个项目。记账时会按日期自动归类。</span></div>
+
+      <div class="field" style="margin-top:18px">
+        <label class="label" for="tp-name">名字</label>
+        <input class="input" id="tp-name" placeholder="例如：東京、清邁、搬家"
+               value="${esc(t.name)}" maxlength="16" autocomplete="off">
+        <p class="err" id="tp-name-err" hidden>请为项目取一个名称</p>
+      </div>
+
+      <div class="fieldrow">
+        <div class="field">
+          <label class="label" for="tp-from">开始</label>
+          <input class="input" id="tp-from" type="date" value="${t.from || ''}">
+        </div>
+        <div class="field">
+          <label class="label" for="tp-to">结束</label>
+          <input class="input" id="tp-to" type="date" value="${t.to || ''}">
+        </div>
+      </div>
+      <p class="hint" style="margin:7px 0 16px">可以留空。填写后，这段日期内记的账会自动归入这个项目。</p>
+
+      <div class="field">
+        <label class="label" for="tp-cur">当地货币</label>
+        <div class="selectwrap">
+          <select class="select" id="tp-cur">
+            <option value="">不指定</option>
+            ${Object.keys(CURRENCIES).map((c) => `
+              <option value="${c}" ${t.currency === c ? 'selected' : ''}>
+                ${c} · ${CURRENCIES[c].name}
+              </option>`).join('')}
+          </select>
+          ${icon('caret-down')}
+        </div>
+        <p class="hint">在这个项目中记账时，金额默认使用该币种，不必每次调整。</p>
+      </div>`,
+    foot: `
+      ${editing ? `<button class="btn btn--ghost" data-del-trip aria-label="删除项目">${icon('trash')}</button>` : ''}
+      <button class="btn btn--primary" data-ok>${icon('check')}${editing ? '保存' : '创建'}</button>`,
+    onMount: (host) => {
+      const q = (sel) => host.querySelector(sel);
+
+      q('[data-ok]').onclick = () => {
+        const name = q('#tp-name').value.trim();
+        q('#tp-name-err').hidden = !!name;
+        q('#tp-name').setAttribute('aria-invalid', String(!name));
+        if (!name) { q('#tp-name').focus(); return; }
+
+        let from = q('#tp-from').value, to = q('#tp-to').value;
+        if (from && to && from > to) [from, to] = [to, from];   // 填反了就换过来
+
+        const rec = touch({ id: t.id, name, from, to, currency: q('#tp-cur').value });
+        if (editing) {
+          state.trips[state.trips.findIndex((x) => x.id === t.id)] = rec;
+        } else {
+          state.trips.push(rec);
+          activeTrip = rec.id;
+        }
+        save(); closeSheetNow(); render(); queueSync();
+        toast(editing ? '项目已更新' : `已创建「${name}」`, 'check');
+      };
+
+      const del = q('[data-del-trip]');
+      if (del) del.onclick = () => {
+        const n = liveExpenses().filter((e) => e.tripId === t.id).length;
+        confirmSheet({
+          title: `删除「${t.name}」`,
+          body: n
+            ? `项目将被删除，其中的 ${n} 笔记录不会丢失，会退回「日常」。`
+            : '这个项目还没有记录，删除不会影响任何账目。',
+          danger: '删除项目',
+          onOk: () => {
+            state.expenses.forEach((e) => {
+              if (e.tripId === t.id) { e.tripId = null; touch(e); }
+            });
+            const rec = state.trips.find((x) => x.id === t.id);
+            if (rec) { rec.deleted = true; touch(rec); }
+            if (activeTrip === t.id) activeTrip = 'all';
+            save(); render(); queueSync(); toast('项目已删除', 'check');
+          },
+        });
+      };
+    },
+  });
+}
+
+/* ==========================================================================
+   记一笔 / 编辑
+   ========================================================================== */
+function openAdd(existing) {
+  const editing = !!existing && existing.type !== 'settle';
+  const guessed = guessTrip(todayISO());
+  const guessedTrip = tripOf(guessed);
+  const draft = editing ? { tripId: null, ...existing } : {
+    id: uid(), type: 'expense', payerId: 'a', amount: '',
+    currency: (guessedTrip && guessedTrip.currency) || state.display,
+    cat: '', merchant: '', note: '', date: todayISO(), split: 'even',
+    tripId: guessed, createdAt: Date.now(),
+  };
+
+  if (existing && existing.type === 'settle') return openSettleDetail(existing);
+
+  const curOptions = Object.keys(CURRENCIES).map((c) =>
+    `<option value="${c}">${c}</option>`).join('');
+
+  openSheet({
+    title: editing ? '编辑这一笔' : '记一笔',
+    body: `
+      ${editing || !SCAN_AVAILABLE() ? '' : `
+      <div id="scan-slot">
+        <button class="dropzone" id="dz" type="button">
+          ${icon('camera')}
+          <strong>拍小票自动识别</strong>
+          <span>金额、币种、商家、日期、分类一次填好</span>
+        </button>
+        <input type="file" id="file" accept="image/*" class="vh">
+        <div style="display:flex;align-items:center;gap:12px;margin:16px 0 4px">
+          <div style="flex:1;height:1px;background:var(--hair)"></div>
+          <span style="font-size:12px;color:var(--muted-2)">或手动填写</span>
+          <div style="flex:1;height:1px;background:var(--hair)"></div>
+        </div>
+      </div>`}
+
+      <form id="f" novalidate>
+        <div class="field">
+          <label class="label" for="f-amt">金额</label>
+          <div class="amountbox">
+            <input id="f-amt" class="num" type="text" inputmode="decimal" placeholder="0.00"
+                   value="${draft.amount || ''}" aria-describedby="f-conv">
+            <select id="f-cur" aria-label="币种">${curOptions}</select>
+          </div>
+          <div class="converted" id="f-conv"></div>
+          <p class="err" id="f-amt-err" hidden>请填写大于 0 的金额</p>
+        </div>
+
+        <div class="field">
+          <label class="label" for="f-merchant">商家 / 事由</label>
+          <input class="input" id="f-merchant" placeholder="例如：翠華餐廳"
+                 value="${esc(draft.merchant)}" maxlength="40">
+        </div>
+
+        <div class="field">
+          <span class="label">分类</span>
+          <div class="catgrid" id="f-cats">
+            ${CATS.map((c) => `
+              <button type="button" class="catbtn" data-cat="${c.id}"
+                      aria-pressed="${draft.cat === c.id}">
+                ${icon(c.icon)}<span>${c.label}</span>
+              </button>`).join('')}
+          </div>
+          <p class="err" id="f-cat-err" hidden>请选择一个分类</p>
+        </div>
+
+        <div class="field">
+          <span class="label">付款人</span>
+          <div class="pick" id="f-payer">
+            ${state.members.map((m, i) => `
+              <button type="button" class="pickbtn" data-payer="${m.id}"
+                      aria-pressed="${draft.payerId === m.id}">
+                <span class="avatar avatar--${i === 0 ? 'a' : 'b'} avatar--sm">${esc(initial(m.name))}</span>
+                ${esc(m.name)}
+              </button>`).join('')}
+          </div>
+        </div>
+
+        <div class="field">
+          <span class="label">分摊方式</span>
+          <div class="pick pick--3" id="f-split">
+            <button type="button" class="pickbtn" data-split="even"  aria-pressed="${draft.split === 'even'}">AA 平分</button>
+            <button type="button" class="pickbtn" data-split="payer" aria-pressed="${draft.split === 'payer'}">请客</button>
+            <button type="button" class="pickbtn" data-split="other" aria-pressed="${draft.split === 'other'}">对方全付</button>
+          </div>
+          <p class="hint" id="f-split-hint"></p>
+        </div>
+
+        <div class="field">
+          <label class="label" for="f-trip">归入项目</label>
+          <div class="selectwrap">
+            <select class="select" id="f-trip">
+              <option value="">日常（不归入项目）</option>
+              ${liveTrips().map((t) => `
+                <option value="${t.id}" ${draft.tripId === t.id ? 'selected' : ''}>
+                  ${esc(t.name)}${tripRange(t) ? ' · ' + tripRange(t) : ''}
+                </option>`).join('')}
+            </select>
+            ${icon('caret-down')}
+          </div>
+          <p class="hint" id="f-trip-hint"></p>
+        </div>
+
+        <div class="fieldrow">
+          <div class="field">
+            <label class="label" for="f-date">日期</label>
+            <input class="input" id="f-date" type="date" value="${draft.date}" max="${todayISO()}">
+          </div>
+          <div class="field">
+            <label class="label" for="f-note">备注</label>
+            <input class="input" id="f-note" placeholder="可留空" value="${esc(draft.note)}" maxlength="30">
+          </div>
+        </div>
+      </form>`,
+    foot: `
+      ${editing ? `<button class="btn btn--ghost" data-del aria-label="删除这一笔">${icon('trash')}</button>` : ''}
+      <button class="btn btn--primary" data-ok>${icon('check')}${editing ? '保存' : '记下'}</button>`,
+    onMount: (host) => wireAddForm(host, draft, editing),
+  });
+}
+
+function wireAddForm(host, draft, editing) {
+  const q = (s) => host.querySelector(s);
+  const curSel = q('#f-cur');
+  curSel.value = draft.currency;
+
+  const syncConverted = () => {
+    const v = parseFloat(q('#f-amt').value);
+    const from = curSel.value;
+    q('#f-conv').innerHTML = !(v > 0) ? '' :
+      DISPLAY.filter((c) => c !== from)
+        .map((c) => `<span>${c} <b class="num">${fmt(convert(v, from, c), c)}</b></span>`)
+        .join('');
+  };
+  const syncSplitHint = () => {
+    const payer = memberName(draft.payerId);
+    const other = memberName(draft.payerId === 'a' ? 'b' : 'a');
+    q('#f-split-hint').textContent =
+      draft.split === 'even'  ? `${payer} 垫付，${other} 补其中一半。` :
+      draft.split === 'payer' ? `${payer} 请客，无需补款。` :
+                                `${payer} 垫付，${other} 补全额。`;
+  };
+
+  const tripSel = q('#f-trip');
+  const syncTripHint = () => {
+    const t = tripOf(tripSel.value);
+    q('#f-trip-hint').textContent = t
+      ? `将计入「${t.name}」的总花费。`
+      : '不属于任何项目的日常开销。';
+  };
+
+  /* 改日期时，如果这天落在某个项目的区间里就自动归过去 */
+  q('#f-date').onchange = () => {
+    const d = q('#f-date').value;
+    const hit = state.trips.find((t) => t.from && t.to && d >= t.from && d <= t.to);
+    if (hit && tripSel.value !== hit.id) {
+      tripSel.value = hit.id;
+      syncTripHint();
+      toast(`已按日期归入「${hit.name}」`, 'airplane-tilt');
+    }
+  };
+  tripSel.onchange = syncTripHint;
+
+  q('#f-amt').oninput = syncConverted;
+  curSel.onchange = () => { draft.currency = curSel.value; syncConverted(); };
+  syncConverted();
+  syncSplitHint();
+  syncTripHint();
+
+  const pickGroup = (sel, attr, key, after) =>
+    host.querySelectorAll(`${sel} [data-${attr}]`).forEach((b) => b.onclick = () => {
+      draft[key] = b.dataset[attr];
+      host.querySelectorAll(`${sel} [data-${attr}]`).forEach((x) =>
+        x.setAttribute('aria-pressed', String(x === b)));
+      after?.();
+    });
+  pickGroup('#f-cats', 'cat', 'cat', () => q('#f-cat-err').hidden = true);
+  pickGroup('#f-payer', 'payer', 'payerId', syncSplitHint);
+  pickGroup('#f-split', 'split', 'split', syncSplitHint);
+
+  /* --- 拍照识别 --- */
+  const dz = q('#dz'), file = q('#file');
+  if (dz) {
+    dz.onclick = () => file.click();
+    dz.ondragover = (e) => { e.preventDefault(); dz.classList.add('is-over'); };
+    dz.ondragleave = () => dz.classList.remove('is-over');
+    dz.ondrop = (e) => {
+      e.preventDefault(); dz.classList.remove('is-over');
+      const f = e.dataTransfer.files?.[0];
+      if (f) handleScan(f, host, draft, syncConverted, syncSplitHint);
+    };
+    file.onchange = () => {
+      const f = file.files?.[0];
+      if (f) handleScan(f, host, draft, syncConverted, syncSplitHint);
+    };
+  }
+
+  /* --- 保存 / 删除 --- */
+  host.querySelector('[data-ok]').onclick = () => {
+    const v = parseFloat(q('#f-amt').value);
+    let bad = false;
+    q('#f-amt-err').hidden = v > 0;
+    q('#f-amt').setAttribute('aria-invalid', String(!(v > 0)));
+    if (!(v > 0)) bad = true;
+    q('#f-cat-err').hidden = !!draft.cat;
+    if (!draft.cat) bad = true;
+    if (bad) { q('#f-amt').focus(); return; }
+
+    const rec = {
+      ...draft,
+      type: 'expense',
+      amount: v,
+      currency: curSel.value,
+      merchant: q('#f-merchant').value.trim(),
+      note: q('#f-note').value.trim(),
+      date: q('#f-date').value || todayISO(),
+      tripId: q('#f-trip').value || null,
+    };
+    delete rec.dirty; touch(rec);
+    if (editing) {
+      const i = state.expenses.findIndex((e) => e.id === rec.id);
+      state.expenses[i] = rec;
+    } else {
+      state.expenses.push(rec);
+    }
+    save(); closeSheetNow(); render(); queueSync();
+    toast(editing ? '已保存' : `记下 ${fmt(convert(rec.amount, rec.currency, state.display), state.display)}`, 'check');
+  };
+
+  const del = host.querySelector('[data-del]');
+  if (del) del.onclick = () => confirmSheet({
+    title: '删除这一笔',
+    body: '删除后差额会重新计算，且无法恢复。',
+    danger: '删除',
+    onOk: () => {
+      const rec = state.expenses.find((e) => e.id === draft.id);
+      if (rec) { rec.deleted = true; touch(rec); }
+      save(); render(); queueSync(); toast('已删除', 'check');
+    },
+  });
+}
+
+function openSettleDetail(e) {
+  const from = memberName(e.payerId), to = memberName(e.payerId === 'a' ? 'b' : 'a');
+  confirmSheet({
+    title: '补款记录',
+    body: `${e.date}，${from} 转给 ${to} ${fmt(e.amount, e.currency)}。删除后差额将恢复。`,
+    danger: '删除这条记录',
+    onOk: () => {
+      const rec = state.expenses.find((x) => x.id === e.id);
+      if (rec) { rec.deleted = true; touch(rec); }
+      save(); render(); queueSync(); toast('已删除', 'check');
+    },
+  });
+}
+
+/* ==========================================================================
+   小票识别
+   ========================================================================== */
+async function compress(file, max = 1400, quality = 0.82) {
+  const bmp = await createImageBitmap(file);
+  const scale = Math.min(1, max / Math.max(bmp.width, bmp.height));
+  const w = Math.round(bmp.width * scale), h = Math.round(bmp.height * scale);
+  const cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  cv.getContext('2d').drawImage(bmp, 0, 0, w, h);
+  bmp.close?.();
+  return cv.toDataURL('image/jpeg', quality);
+}
+
+async function handleScan(file, host, draft, syncConverted, syncSplitHint) {
+  const slot = host.querySelector('#scan-slot');
+  if (!slot) return;
+
+  let dataUrl;
+  try {
+    dataUrl = await compress(file);
+  } catch {
+    toast('无法读取这个文件，请换一张图片', 'warning-circle');
+    return;
+  }
+
+  slot.innerHTML = `
+    <div class="preview">
+      <img src="${dataUrl}" alt="上传的小票">
+      <button class="preview__x" type="button" id="scan-x" aria-label="移除照片">${icon('x')}</button>
+    </div>
+    <div class="scanning">${icon('arrows-clockwise')}<span>正在识别这张小票…</span></div>
+    <div class="skelform">
+      <div><div class="skel" style="height:11px;width:52px"></div><div class="skel" style="height:38px"></div></div>
+      <div><div class="skel" style="height:11px;width:76px"></div><div class="skel" style="height:38px"></div></div>
+    </div>`;
+  const resetSlot = () => { slot.innerHTML = ''; openAdd(); };
+  host.querySelector('#scan-x').onclick = resetSlot;
+
+  let out;
+  try {
+    const res = await fetch(scanUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: dataUrl, categories: CATS.map((c) => ({ id: c.id, label: c.label })) }),
+    });
+    out = await res.json();
+    if (!res.ok) throw new Error(out.error || `识别服务返回 ${res.status}`);
+  } catch (err) {
+    slot.innerHTML = `
+      <div class="preview">
+        <img src="${dataUrl}" alt="上传的小票">
+        <button class="preview__x" type="button" id="scan-x2" aria-label="移除照片">${icon('x')}</button>
+      </div>
+      <div class="alert" style="margin-top:12px">${icon('warning-circle')}
+        <span>识别未成功：${esc(err.message)}<br>在下方手动填写同样可以记账。</span></div>`;
+    host.querySelector('#scan-x2').onclick = resetSlot;
+    return;
+  }
+
+  /* 回填表单 */
+  const q = (s) => host.querySelector(s);
+  if (out.amount > 0) q('#f-amt').value = String(out.amount);
+  if (out.currency && CURRENCIES[out.currency]) {
+    q('#f-cur').value = out.currency;
+    draft.currency = out.currency;
+  }
+  if (out.merchant) q('#f-merchant').value = out.merchant.slice(0, 40);
+  if (out.note) q('#f-note').value = out.note.slice(0, 30);
+  if (out.date && /^\d{4}-\d{2}-\d{2}$/.test(out.date) && out.date <= todayISO()) {
+    q('#f-date').value = out.date;
+  }
+  const cat = CATS.find((c) => c.id === out.category);
+  if (cat) {
+    draft.cat = cat.id;
+    host.querySelectorAll('#f-cats [data-cat]').forEach((b) =>
+      b.setAttribute('aria-pressed', String(b.dataset.cat === cat.id)));
+    q('#f-cat-err').hidden = true;
+  }
+  syncConverted(); syncSplitHint();
+
+  const conf = out.confidence === 'low' ? '有几项不太确定，保存前请核对一下'
+             : out.mock ? '这是演示数据，配置 API key 后会真实识别'
+             : '识别完成，确认无误即可保存';
+  slot.innerHTML = `
+    <div class="preview">
+      <img src="${dataUrl}" alt="上传的小票">
+      <button class="preview__x" type="button" id="scan-x3" aria-label="移除照片">${icon('x')}</button>
+    </div>
+    <div class="scanning" style="background:var(--surface-2);color:var(--ink-2)">
+      ${icon(out.confidence === 'low' || out.mock ? 'warning-circle' : 'sparkle')}
+      <span>${esc(conf)}</span>
+    </div>`;
+  host.querySelector('#scan-x3').onclick = resetSlot;
+  q('#f-amt').focus();
+  q('#f-amt').select?.();
+}
+
+
+/* ==========================================================================
+   同步
+
+   模型很简单：先把本地脏数据推上去，再拉服务器上比 lastPull 新的东西。
+   冲突按 updatedAt 后写赢。删除是软删除，不然对方那台机器永远收不到「这条没了」。
+   没网就把 dirty 标记留着，下次触发时再冲。
+   ========================================================================== */
+const SYNC_KEY = 'tally.sync.v1';
+
+let syncState = loadSync();           // { code, lastPull, lastOk }
+let syncStatus = 'off';               // off | idle | busy | error | offline
+let syncError = '';
+let syncTimer = null;
+let pollTimer = null;
+
+function loadSync() {
+  try { return JSON.parse(localStorage.getItem(SYNC_KEY)) || { code: null, lastPull: null, lastOk: null }; }
+  catch { return { code: null, lastPull: null, lastOk: null }; }
+}
+function saveSync() { localStorage.setItem(SYNC_KEY, JSON.stringify(syncState)); }
+
+const isSynced = () => SYNC_AVAILABLE && !!syncState.code;
+
+async function rpc(fn, args) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+    method: 'POST',
+    headers: {
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${SUPABASE_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(args),
+  });
+  let data = null;
+  try { data = await res.json(); } catch {}
+  if (!res.ok) {
+    const e = new Error(data?.message || `HTTP ${res.status}`);
+    e.pgcode = data?.code;
+    throw e;
+  }
+  return data;
+}
+
+/** dirty 是本地字段，不往上传 */
+const clean = (r) => { const { dirty, ...rest } = r; return rest; };
+
+/** 记完账不立刻发，攒 700ms，连着改几笔只发一次 */
+function queueSync() {
+  if (!isSynced()) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => syncNow(), 700);
+}
+
+async function syncNow({ manual = false } = {}) {
+  if (!isSynced() || syncStatus === 'busy') return;
+  syncStatus = 'busy'; syncError = ''; paintSync();
+
+  try {
+    const dirtyE = state.expenses.filter((e) => e.dirty);
+    const dirtyT = state.trips.filter((t) => t.dirty);
+
+    if (dirtyE.length || dirtyT.length || state.metaDirty) {
+      await rpc('tally_push', {
+        p_code: syncState.code,
+        p_entries: dirtyE.map(clean),
+        p_trips: dirtyT.map(clean),
+        p_members: state.metaDirty ? state.members : null,
+        // display 故意不同步：Chloe 在香港看 HKD，Wen 在英国看 GBP，各看各的
+      });
+      dirtyE.forEach((e) => delete e.dirty);
+      dirtyT.forEach((t) => delete t.dirty);
+      state.metaDirty = false;
+    }
+
+    const out = await rpc('tally_pull', {
+      p_code: syncState.code,
+      p_since: syncState.lastPull,
+    });
+    const changed = mergePull(out);
+
+    syncState.lastPull = out.serverTime;
+    syncState.lastOk = Date.now();
+    saveSync(); save();
+    syncStatus = 'idle'; paintSync();
+
+    if (changed || manual) render();
+    if (manual) toast(changed ? '同步完成' : '已是最新', 'check');
+  } catch (err) {
+    const offline = !navigator.onLine || err.message === 'Failed to fetch';
+    syncStatus = offline ? 'offline' : 'error';
+    syncError = err.pgcode === 'P0002' ? '账本码无效，可能已被移除' : err.message;
+    paintSync();
+    if (manual) toast(offline ? '暂时连接不上，恢复网络后会自动重试' : `同步失败：${syncError}`, 'warning-circle');
+    console.warn('[sync]', err);
+  }
+}
+
+/** 把服务器数据并回本地。返回「有没有真的变了」，没变就不重绘。 */
+function mergePull(out) {
+  let changed = false;
+
+  const mergeList = (incoming, localList, keyFields) => {
+    for (const inc of incoming || []) {
+      const i = localList.findIndex((x) => x.id === inc.id);
+      const local = i >= 0 ? localList[i] : null;
+
+      // 本地还没推上去的改动更新，先留着，下一轮 push 会覆盖服务器
+      if (local?.dirty) continue;
+      if (local && local.updatedAt === inc.updatedAt) continue;
+
+      const rec = keyFields(inc);
+      if (i >= 0) localList[i] = rec; else localList.push(rec);
+      changed = true;
+    }
+  };
+
+  mergeList(out.entries, state.expenses, (e) => ({
+    id: e.id, type: e.type, payerId: e.payerId, amount: Number(e.amount),
+    currency: e.currency, cat: e.cat || '', merchant: e.merchant || '',
+    note: e.note || '', date: e.date, split: e.split, tripId: e.tripId || null,
+    deleted: !!e.deleted, createdAt: Number(e.createdAt) || 0, updatedAt: e.updatedAt,
+  }));
+
+  mergeList(out.trips, state.trips, (t) => ({
+    id: t.id, name: t.name, from: t.from || '', to: t.to || '',
+    currency: t.currency || '', deleted: !!t.deleted, updatedAt: t.updatedAt,
+  }));
+
+  if (!state.metaDirty && out.members?.length) {
+    if (JSON.stringify(out.members) !== JSON.stringify(state.members)) {
+      state.members = out.members; changed = true;
+    }
+  }
+
+  // 当前看的项目被对方删了，退回全部
+  if (activeTrip !== 'all' && activeTrip !== 'daily' && !tripOf(activeTrip)) {
+    activeTrip = 'all';
+  }
+  return changed;
+}
+
+/* ---------- 建账本 / 加入 / 断开 ---------- */
+async function createLedger() {
+  const out = await rpc('tally_create', { p_members: state.members });
+  syncState = { code: out.code, lastPull: null, lastOk: null };
+  saveSync();
+  // 本地已有的记录全部标脏，第一次 syncNow 会整批推上去
+  state.expenses.forEach(touch);
+  state.trips.forEach(touch);
+  touchMeta(); save();
+  await syncNow();
+  return out.code;
+}
+
+async function joinLedger(code) {
+  const clean = code.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  const out = await rpc('tally_pull', { p_code: clean });   // 码不对这里就会抛
+  syncState = { code: clean, lastPull: null, lastOk: null };
+  saveSync();
+  // 加入 = 以服务器为准，本地那份（多半是示例数据）整个换掉
+  state.expenses = []; state.trips = []; state.metaDirty = false;
+  mergePull(out);
+  syncState.lastPull = out.serverTime;
+  syncState.lastOk = Date.now();
+  activeTrip = 'all';
+  saveSync(); save();
+  syncStatus = 'idle';
+  return clean;
+}
+
+function disconnectSync() {
+  syncState = { code: null, lastPull: null, lastOk: null };
+  saveSync();
+  state.expenses.forEach((e) => delete e.dirty);
+  state.trips.forEach((t) => delete t.dirty);
+  state.metaDirty = false;
+  syncStatus = 'off';
+  save(); render();
+}
+
+/* ---------- 状态指示 ---------- */
+function syncLabel() {
+  if (!isSynced()) return '仅本机';
+  if (syncStatus === 'busy') return '同步中';
+  if (syncStatus === 'offline') return '离线，改动已保存';
+  if (syncStatus === 'error') return '同步出错';
+  if (!syncState.lastOk) return '待同步';
+  const mins = Math.floor((Date.now() - syncState.lastOk) / 60000);
+  return mins < 1 ? '刚刚同步' : mins < 60 ? `${mins} 分钟前同步` : '较久未同步';
+}
+
+function paintSync() {
+  document.querySelectorAll('[data-sync-badge]').forEach((el) => {
+    el.dataset.state = syncStatus;
+    el.querySelector('span').textContent = syncLabel();
+  });
+  const v = $('[data-sync-status]');
+  if (v) v.textContent = syncLabel();
+}
+
+/* ---------- 触发时机 ----------
+   回到这个页面时拉一次（对方在别处记的账就出来了），
+   有网了拉一次，另外每 90 秒兜一次底。轮询对记账来说完全够用，
+   不值得为了它上 websocket。                                            */
+function startSyncLoop() {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') syncNow();
+  });
+  window.addEventListener('online', () => syncNow());
+  clearInterval(pollTimer);
+  pollTimer = setInterval(() => {
+    if (document.visibilityState === 'visible') syncNow();
+  }, 90000);
+}
+
+/* ==========================================================================
+   启动
+   ========================================================================== */
+async function boot() {
+  const sprite = await fetch('/sprite.svg').then((r) => r.text());
+  $('#sprite-host').innerHTML = sprite;
+  if (isSynced()) syncStatus = 'idle';
+  render();
+  await loadRates();
+  render();
+  if (isSynced()) { startSyncLoop(); syncNow(); }
+}
+boot();
