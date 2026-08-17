@@ -1357,7 +1357,7 @@ button.listrow:hover { background: var(--surface-2); }
   display: grid;
   justify-items: center;
   gap: 7px;
-  padding: 13px 6px 11px;
+  padding: 14px 6px 12px;
   border-radius: var(--r-tile);
   background: var(--surface);
   border: 1px solid var(--hair);
@@ -1382,9 +1382,36 @@ button.listrow:hover { background: var(--surface-2); }
   letter-spacing: -.01em;
   color: var(--ink);
 }
-.swatch__hint { font-size: 10.5px; color: var(--muted); }
 .swatch[aria-checked="true"] .swatch__name { color: var(--accent); }
 
 @media (max-width: 359px) {
   .swatches { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ==========================================================================
+   引导页的名字对
+   ========================================================================== */
+.namepair {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 12px;
+  align-items: end;
+  margin-top: 18px;
+}
+.namepair .field + .field { margin-top: 0; }
+.namepair__roll {
+  width: 46px; height: 46px;
+  border-radius: var(--r-input);
+  border: 1px solid var(--hair);
+  background: var(--surface);
+  color: var(--muted);
+  flex: none;
+}
+.namepair__roll:hover { color: var(--accent); border-color: var(--accent); background: var(--surface); }
+.namepair__roll:active { transform: rotate(-30deg) scale(.94); }
+.namepair__roll .icon { width: 17px; height: 17px; }
+
+@media (max-width: 359px) {
+  .namepair { grid-template-columns: 1fr 1fr; }
+  .namepair__roll { grid-column: 1 / -1; width: 100%; }
 }
