@@ -4,7 +4,7 @@
    ========================================================================== */
 
 import { SUPABASE_URL, SUPABASE_KEY, SYNC_AVAILABLE,
-         RATES_URL, scanUrl, SCAN_AVAILABLE } from './config.js';
+         RATES_URL, scanUrl, SCAN_AVAILABLE, SUPPORT_URL } from './config.js';
 
 /* ---------- 小工具 ---------- */
 const $  = (sel, root = document) => root.querySelector(sel);
@@ -391,8 +391,9 @@ function render() {
     ${isSynced() ? `<span class="syncdot" data-sync-badge data-state="${syncStatus}">
       <i></i><span>${syncLabel()}</span></span>` : ''}`;
   $('#view').innerHTML =
-    route === 'ledger' ? viewLedger() :
-    route === 'stats'  ? viewStats()  : viewSettings();
+    route === 'ledger'  ? viewLedger()  :
+    route === 'stats'   ? viewStats()   :
+    route === 'support' ? viewSupport() : viewSettings();
   renderNav();
   renderRail();
   wireView();
@@ -408,7 +409,8 @@ function renderNav() {
     </div>`;
 }
 const navBtn = (t) => `
-  <button class="nav__btn" data-go="${t.id}" ${route === t.id ? 'aria-current="page"' : ''}>
+  <button class="nav__btn" data-go="${t.id}" ${
+    route === t.id || (t.id === 'settings' && route === 'support') ? 'aria-current="page"' : ''}>
     ${icon(t.icon)}<span>${t.label}</span>
   </button>`;
 
@@ -416,7 +418,8 @@ function renderRail() {
   $('#rail').innerHTML = `
     <div class="wordmark">${brand()}<span>WeTab</span></div>
     ${TABS.map((t) => `
-      <button class="rail__btn" data-go="${t.id}" ${route === t.id ? 'aria-current="page"' : ''}>
+      <button class="rail__btn" data-go="${t.id}" ${
+        route === t.id || (t.id === 'settings' && route === 'support') ? 'aria-current="page"' : ''}>
         ${icon(t.icon)}<span>${t.label}</span>
       </button>`).join('')}
     <button class="btn btn--primary" data-add>${icon('plus')}记一笔</button>
@@ -730,6 +733,111 @@ function tripsSection() {
     </div>`;
 }
 
+
+/* ==========================================================================
+   支持页的插画
+
+   风格参考 Noritake 那一路：均匀细线、圆头线帽、纯几何、不填色、大量留白。
+   全是原创的形，不是任何人作品的临摹。线宽用 stroke-width 统一，缩放时
+   靠 vector-effect 保持一致，所以同一段路径在 28px 和 160px 下都好看。
+   ========================================================================== */
+/* 线宽交给 CSS + vector-effect: non-scaling-stroke，
+   所以同一段路径在 22px 和 220px 下都是同样纤细的一根线。 */
+const LINE = 'fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"';
+
+/** 一杯冒热气的咖啡。主插画 */
+const artCoffee = (cls = 'art') => `
+  <svg class="${cls}" viewBox="0 0 160 128" aria-hidden="true">
+    <g ${LINE}>
+      <path d="M42 50 H110"/>
+      <path d="M46 50 L52 96 a9 9 0 0 0 9 8 h34 a9 9 0 0 0 9 -8 L106 50"/>
+      <path d="M105 60 c16 -2 18 26 0 24"/>
+      <path d="M32 114 H128"/>
+      <path d="M68 40 c6 -6 -6 -10 0 -16 s-6 -10 0 -16"/>
+      <path d="M89 37 c5 -5 -5 -9 0 -14 s-5 -9 0 -14"/>
+    </g>
+  </svg>`;
+
+/** 对切的三明治 */
+const artSandwich = (cls = 'art') => `
+  <svg class="${cls}" viewBox="0 0 64 64" aria-hidden="true">
+    <g ${LINE}>
+      <path d="M9 50 L32 12 L55 50 z"/>
+      <path d="M17 43 c5 -4 7 3 12 -1 s7 3 12 -1 s4 1 5 2"/>
+    </g>
+  </svg>`;
+
+/** 一顿正经饭：碗和筷子 */
+const artBowl = (cls = 'art') => `
+  <svg class="${cls}" viewBox="0 0 64 64" aria-hidden="true">
+    <g ${LINE}>
+      <path d="M8 31 H50 a21 21 0 0 1 -42 0 z"/>
+      <path d="M4 55 H60"/>
+      <path d="M45 8 L34 27"/>
+      <path d="M53 11 L41 28"/>
+    </g>
+  </svg>`;
+
+/** 挥手的小人。页脚的句号 */
+const artWave = (cls = 'art') => `
+  <svg class="${cls}" viewBox="0 0 64 76" aria-hidden="true">
+    <g ${LINE}>
+      <circle cx="30" cy="20" r="14"/>
+      <path d="M30 34 v20"/>
+      <path d="M30 41 L17 51"/>
+      <path d="M30 39 L47 26"/>
+      <path d="M30 54 L21 70"/>
+      <path d="M30 54 L39 70"/>
+      <path d="M47 26 l-3 -5 M47 26 l5 -2"/>
+    </g>
+    <g fill="currentColor" stroke="none">
+      <circle cx="25" cy="19" r="1.9"/>
+      <circle cx="35" cy="19" r="1.9"/>
+    </g>
+  </svg>`;
+
+const TIERS = [
+  { art: artCoffee,   label: '一杯咖啡',   note: '够我写完下一个小功能' },
+  { art: artSandwich, label: '一个三明治', note: '刚好是一顿午饭' },
+  { art: artBowl,     label: '一顿好的',   note: '那我可能会加个预算提醒' },
+];
+
+/* ---------- 支持页 ---------- */
+function viewSupport() {
+  return `
+    <div class="sec" style="margin-top:8px">
+      <button class="btn btn--quiet" data-go="settings" style="margin-left:-14px">
+        ${icon('caret-left')}设置
+      </button>
+    </div>
+
+    <section class="support">
+      ${artCoffee('art art--hero')}
+      <h2 class="support__title">请我喝杯咖啡</h2>
+      <p class="support__lead">
+        WeTab 是免费的，没有广告，也不会拿你的账目去做任何事。
+        如果它帮你省掉了几次「上次那顿谁付的」，随意就好。
+      </p>
+    </section>
+
+    <div class="tiers">
+      ${TIERS.map((t) => `
+        <a class="tier" href="${esc(SUPPORT_URL)}" target="_blank" rel="noopener noreferrer">
+          ${t.art('art art--tier')}
+          <span class="tier__body">
+            <span class="tier__label">${t.label}</span>
+            <span class="tier__note">${t.note}</span>
+          </span>
+          ${icon('arrow-right', 'icon tier__go')}
+        </a>`).join('')}
+    </div>
+
+    <div class="support__foot">
+      ${artWave('art art--wave')}
+      <p>不请也完全没关系，好好记账就是最好的支持。</p>
+    </div>`;
+}
+
 /* ---------- 设置 ---------- */
 function viewSettings() {
   return `
@@ -781,6 +889,15 @@ function viewSettings() {
     <p class="footnote">只影响这台设备。</p>
 
     ${SYNC_AVAILABLE ? syncPanel() : ''}
+
+    ${SUPPORT_URL ? `
+      <div class="card" style="margin-top:26px">
+        <button class="listrow" data-go="support">
+          ${artCoffee('art art--row')}
+          <span class="listrow__label">支持开发者</span>
+          ${icon('caret-right')}
+        </button>
+      </div>` : ''}
 
     <div class="sec"><h2>数据</h2></div>
     <div class="card">

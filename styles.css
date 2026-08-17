@@ -1632,3 +1632,78 @@ button.listrow:hover { background: var(--surface-2); }
   text-underline-offset: 2px;
 }
 .linkbtn:active { opacity: .6; }
+
+/* ==========================================================================
+   支持页
+   线稿插画不填色，颜色靠 currentColor 继承，所以四套配色和明暗都自动适配。
+   ========================================================================== */
+.art { display: block; color: var(--ink); }
+/* 线宽不随缩放变化，这样 22px 的行内图标和 220px 的主插画是同一种笔触 */
+.art * { vector-effect: non-scaling-stroke; }
+.art--hero * { stroke-width: 2.6; }
+.art--tier * { stroke-width: 1.9; }
+.art--row  * { stroke-width: 1.6; }
+.art--wave * { stroke-width: 1.8; }
+.art--hero {
+  width: min(220px, 62vw);
+  height: auto;
+  margin: 0 auto 26px;
+  color: var(--accent);
+}
+.art--tier { width: 40px; height: 40px; flex: none; color: var(--ink-2); }
+.art--row  { width: 22px; height: 22px; flex: none; color: var(--muted); }
+.art--wave { width: 52px; height: 58px; margin: 0 auto 14px; color: var(--muted-2); }
+
+.support { text-align: center; padding: 14px 0 30px; }
+.support__title {
+  font-size: 23px;
+  font-weight: 620;
+  letter-spacing: -.03em;
+}
+.support__lead {
+  margin: 10px auto 0;
+  max-width: 30ch;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+.tiers { display: grid; gap: 10px; }
+.tier {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 15px 17px;
+  border-radius: var(--r-card);
+  background: var(--surface);
+  border: 1px solid var(--hair-soft);
+  box-shadow: var(--shadow-sm);
+  text-decoration: none;
+  color: inherit;
+  transition: border-color .16s var(--ease), transform .12s var(--ease);
+}
+.tier:hover { border-color: var(--accent); }
+.tier:hover .art--tier { color: var(--accent); }
+.tier:active { transform: scale(.99); }
+.tier__body { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.tier__label { font-size: 15px; font-weight: 560; letter-spacing: -.02em; }
+.tier__note { font-size: 12.5px; color: var(--muted); }
+.tier__go { width: 16px; height: 16px; color: var(--muted-2); flex: none; }
+.tier:hover .tier__go { color: var(--accent); }
+
+.support__foot {
+  text-align: center;
+  padding: 44px 0 10px;
+}
+.support__foot p {
+  font-size: 12.5px;
+  color: var(--muted-2);
+  line-height: 1.6;
+}
+
+@media (min-width: 900px) {
+  .support { padding-top: 4px; }
+  .tiers { grid-template-columns: repeat(3, 1fr); }
+  .tier { flex-direction: column; align-items: flex-start; gap: 12px; padding: 20px; }
+  .tier__go { display: none; }
+}

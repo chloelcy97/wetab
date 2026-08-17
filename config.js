@@ -41,3 +41,13 @@ export const SCAN_AVAILABLE = () => Boolean(scanUrl());
 export const RATES_URL =
   'https://api.frankfurter.dev/v1/latest?base=EUR&symbols=' +
   'HKD,GBP,CNY,USD,JPY,KRW,SGD,AUD,CAD,CHF,NZD,THB,MYR,IDR,PHP,INR';
+
+/* --------------------------------------------------------------------------
+   支持开发者
+
+   填上你的收款页地址（Buy Me a Coffee / Ko-fi / PayPal.me / 爱发电 都行），
+   设置页里就会出现「支持开发者」入口。留空则整个入口不显示。
+
+   例：'https://buymeacoffee.com/yourname'
+   -------------------------------------------------------------------------- */
+export const SUPPORT_URL = '';
