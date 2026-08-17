@@ -232,7 +232,7 @@ const sorted = (list = liveExpenses()) => [...list].sort(
 /* ==========================================================================
    项目（一次旅行 / 一个城市 / 一段共同开销）
    ========================================================================== */
-const tripOf = (id) => state.trips.find((t) => t.id === id) || null;
+const tripOf = (id) => state.trips.find((t) => t.id === id && !t.deleted) || null;
 
 /** 按当前筛选取记录 */
 function scopedExpenses(scope = activeTrip) {
@@ -415,7 +415,7 @@ function viewLedger() {
       <button class="chip" role="tab" data-scope="daily" aria-selected="${scope === 'daily'}">
         ${icon('house-line')}日常
       </button>
-      ${state.trips.map((t) => `
+      ${liveTrips().map((t) => `
         <button class="chip" role="tab" data-scope="${t.id}" aria-selected="${scope === t.id}">
           ${icon('airplane-tilt')}${esc(t.name)}
         </button>`).join('')}
@@ -642,6 +642,8 @@ function viewSettings() {
     </div>
     <p class="footnote">修改后会立即反映到账本和统计中。</p>
 
+    ${lookPanel()}
+
     <div class="sec">
       <h2>项目</h2>
       <button class="btn btn--quiet" data-new-trip>${icon('plus')}新建</button>
@@ -847,6 +849,84 @@ async function copyCode(code) {
   }
 }
 
+
+/* ==========================================================================
+   外观：配色 + 明暗
+   都是本机设置，不跟着账本同步 —— 你在香港想要青瓷，对方想要墨色，各挑各的。
+   ========================================================================== */
+const PALETTES = [
+  { id: 'cobalt', label: '钴蓝', hint: '冷静克制', swatch: ['#2F53D6', '#EEF0ED', '#14171A'], themeColor: { light: '#EEF0ED', dark: '#0D0F11' } },
+  { id: 'celadon', label: '青瓷', hint: '清新', swatch: ['#2E7D6A', '#EDF1EE', '#131A17'], themeColor: { light: '#EDF1EE', dark: '#0B100E' } },
+  { id: 'ink', label: '墨', hint: '近乎单色', swatch: ['#171614', '#EFEEEB', '#8A7355'], themeColor: { light: '#EFEEEB', dark: '#0E0E0D' } },
+  { id: 'clay', label: '赤陶', hint: '温暖大气', swatch: ['#A9503A', '#F1EDE9', '#1B1714'], themeColor: { light: '#F1EDE9', dark: '#110E0C' } }
+];
+const MODES = [
+  { id: 'auto',  label: '跟随系统' },
+  { id: 'light', label: '浅色' },
+  { id: 'dark',  label: '深色' },
+];
+const LOOK_KEY = 'wetab.look.v1';
+
+let look = loadLook();
+
+function loadLook() {
+  try {
+    const o = JSON.parse(localStorage.getItem(LOOK_KEY)) || {};
+    return {
+      palette: PALETTES.some((p) => p.id === o.palette) ? o.palette : 'cobalt',
+      mode: MODES.some((m) => m.id === o.mode) ? o.mode : 'auto',
+    };
+  } catch { return { palette: 'cobalt', mode: 'auto' }; }
+}
+
+function applyLook() {
+  const root = document.documentElement;
+  root.dataset.palette = look.palette;
+  if (look.mode === 'auto') delete root.dataset.theme;
+  else root.dataset.theme = look.mode;
+
+  /* 手机上状态栏 / 地址栏的颜色跟着走 */
+  const p = PALETTES.find((x) => x.id === look.palette);
+  const dark = look.mode === 'dark'
+    || (look.mode === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+  document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.remove());
+  const meta = document.createElement('meta');
+  meta.name = 'theme-color';
+  meta.content = dark ? p.themeColor.dark : p.themeColor.light;
+  document.head.appendChild(meta);
+}
+
+function setLook(patch) {
+  Object.assign(look, patch);
+  localStorage.setItem(LOOK_KEY, JSON.stringify(look));
+  applyLook();
+  render();
+}
+
+/* ---------- 设置页的外观面板 ---------- */
+function lookPanel() {
+  return `
+    <div class="sec"><h2>外观</h2></div>
+    <div class="swatches" role="radiogroup" aria-label="配色">
+      ${PALETTES.map((p) => `
+        <button class="swatch" role="radio" data-palette="${p.id}"
+                aria-checked="${look.palette === p.id}">
+          <span class="swatch__chip">
+            ${p.swatch.map((c) => `<i style="background:${c}"></i>`).join('')}
+          </span>
+          <span class="swatch__name">${p.label}</span>
+          <span class="swatch__hint">${p.hint}</span>
+        </button>`).join('')}
+    </div>
+
+    <div class="seg" role="tablist" aria-label="明暗">
+      ${MODES.map((m) => `
+        <button class="seg__btn" role="tab" data-mode="${m.id}"
+          aria-selected="${look.mode === m.id}">${m.label}</button>`).join('')}
+    </div>
+    <p class="footnote">外观只影响这台设备，跟账目无关，也不会同步给对方。</p>`;
+}
+
 /* ==========================================================================
    事件绑定
    ========================================================================== */
@@ -882,6 +962,8 @@ function wireView() {
     });
 
   const on = (sel, fn) => document.querySelectorAll(sel).forEach((el) => el.onclick = () => fn(el));
+  on('[data-palette]', (el) => setLook({ palette: el.dataset.palette }));
+  on('[data-mode]', (el) => setLook({ mode: el.dataset.mode }));
   on('[data-sync-create]', openSyncCreate);
   on('[data-sync-join]', openSyncJoin);
   on('[data-sync-now]', () => syncNow({ manual: true }));
@@ -1284,7 +1366,7 @@ function wireAddForm(host, draft, editing) {
   /* 改日期时，如果这天落在某个项目的区间里就自动归过去 */
   q('#f-date').onchange = () => {
     const d = q('#f-date').value;
-    const hit = state.trips.find((t) => t.from && t.to && d >= t.from && d <= t.to);
+    const hit = liveTrips().find((t) => t.from && t.to && d >= t.from && d <= t.to);
     if (hit && tripSel.value !== hit.id) {
       tripSel.value = hit.id;
       syncTripHint();
@@ -1708,6 +1790,7 @@ function startSyncLoop() {
    启动
    ========================================================================== */
 async function boot() {
+  applyLook();
   const sprite = await fetch(new URL('./sprite.svg', import.meta.url)).then((r) => r.text());
   $('#sprite-host').innerHTML = sprite;
   if (isSynced()) syncStatus = 'idle';

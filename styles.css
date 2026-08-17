@@ -1,32 +1,21 @@
 /* ==========================================================================
-   Tally — 双人共享账本
+   WeTab — 双人共享账本
    设计系统 tokens。全站锁定：
-     · 一个强调色（cobalt），不出现第二个装饰色
-     · 圆角规则：卡片 18px / 输入 12px / 按钮与胶囊 999px / 图标底 14px
+     · 每套配色只有一个强调色，不出现第二个装饰色
+     · 圆角只有四档：卡片 18px / 输入 12px / 图标底 14px / 按钮与胶囊全圆
      · 数字一律等宽 tabular-nums
+
+   配色由 <html data-palette="..."> 决定，明暗由 data-theme 决定：
+     不设 data-theme  → 跟随系统
+     data-theme=light → 强制浅色
+     data-theme=dark  → 强制深色
+
+   所有颜色对都跑过 WCAG AA 校验（正文 4.5:1，三级文字 3.5:1）。
+   member-a / member-b 是两个人的头像色，单独提成 token —— 「墨」这套配色的
+   强调色就是墨色本身，如果沿用「accent + ink」两人的头像会撞成一样。
    ========================================================================== */
 
 :root {
-  /* 冷调纸面 + 钴蓝，不是米色黄铜那一套 */
-  --bg:          #EEF0ED;
-  --surface:     #FFFFFF;
-  --surface-2:   #F6F7F5;
-  --ink:         #14171A;
-  --ink-2:       #454B52;
-  --muted:       #787E86;
-  --muted-2:     #9AA0A6;
-  --hair:        #E0E3DE;
-  --hair-soft:   #EAECE8;
-
-  --accent:      #2F53D6;
-  --accent-hi:   #2846BC;
-  --accent-soft: #E6EBFA;
-  --on-accent:   #FFFFFF;
-
-  --shadow-sm: 0 1px 2px rgb(20 23 26 / .05), 0 1px 1px rgb(20 23 26 / .04);
-  --shadow-md: 0 8px 24px -8px rgb(20 23 26 / .14), 0 2px 6px -2px rgb(20 23 26 / .06);
-  --shadow-lg: 0 24px 60px -18px rgb(20 23 26 / .28), 0 4px 12px -4px rgb(20 23 26 / .08);
-
   --r-card: 18px;
   --r-input: 12px;
   --r-tile: 14px;
@@ -39,11 +28,103 @@
   --font-num: ui-monospace, "SF Mono", "JetBrains Mono", "Roboto Mono", Menlo, monospace;
 
   --nav-h: 68px;
+}
+
+/* ---------- 浅色（默认，以及 data-theme=light 强制）---------- */
+:root,
+:root[data-palette="cobalt"] {
+  --bg:          #EEF0ED;
+  --surface:     #FFFFFF;
+  --surface-2:   #F6F7F5;
+  --ink:         #14171A;
+  --ink-2:       #454B52;
+  --muted:       #686E74;
+  --muted-2:     #787C81;
+  --hair:        #E0E3DE;
+  --hair-soft:   #EAECE8;
+  --accent:      #2F53D6;
+  --accent-hi:   #2846BC;
+  --accent-soft: #E6EBFA;
+  --on-accent:   #FFFFFF;
+  --member-a:    #2F53D6;
+  --member-b:    #14171A;
+  --on-member-b: #FFFFFF;
+  --shadow-sm: 0 1px 2px rgb(20 23 26 / .05), 0 1px 1px rgb(20 23 26 / .04);
+  --shadow-md: 0 8px 24px -8px rgb(20 23 26 / .14), 0 2px 6px -2px rgb(20 23 26 / .06);
+  --shadow-lg: 0 24px 60px -18px rgb(20 23 26 / .28), 0 4px 12px -4px rgb(20 23 26 / .08);
+  color-scheme: light;
+}
+:root[data-palette="celadon"] {
+  --bg:          #EDF1EE;
+  --surface:     #FFFFFF;
+  --surface-2:   #F5F8F6;
+  --ink:         #131A17;
+  --ink-2:       #414D49;
+  --muted:       #626E6A;
+  --muted-2:     #777F7C;
+  --hair:        #DCE4E0;
+  --hair-soft:   #E7EDEA;
+  --accent:      #2E7D6A;
+  --accent-hi:   #256756;
+  --accent-soft: #E0EFE9;
+  --on-accent:   #FFFFFF;
+  --member-a:    #2E7D6A;
+  --member-b:    #131A17;
+  --on-member-b: #FFFFFF;
+  --shadow-sm: 0 1px 2px rgb(20 23 26 / .05), 0 1px 1px rgb(20 23 26 / .04);
+  --shadow-md: 0 8px 24px -8px rgb(20 23 26 / .14), 0 2px 6px -2px rgb(20 23 26 / .06);
+  --shadow-lg: 0 24px 60px -18px rgb(20 23 26 / .28), 0 4px 12px -4px rgb(20 23 26 / .08);
+  color-scheme: light;
+}
+:root[data-palette="ink"] {
+  --bg:          #EFEEEB;
+  --surface:     #FFFFFF;
+  --surface-2:   #F7F6F3;
+  --ink:         #171614;
+  --ink-2:       #4A4741;
+  --muted:       #6F6C65;
+  --muted-2:     #817D78;
+  --hair:        #E1DFDA;
+  --hair-soft:   #EBE9E5;
+  --accent:      #171614;
+  --accent-hi:   #000000;
+  --accent-soft: #E5E3DE;
+  --on-accent:   #FFFFFF;
+  --member-a:    #171614;
+  --member-b:    #8A7355;
+  --on-member-b: #000000;
+  --shadow-sm: 0 1px 2px rgb(20 23 26 / .05), 0 1px 1px rgb(20 23 26 / .04);
+  --shadow-md: 0 8px 24px -8px rgb(20 23 26 / .14), 0 2px 6px -2px rgb(20 23 26 / .06);
+  --shadow-lg: 0 24px 60px -18px rgb(20 23 26 / .28), 0 4px 12px -4px rgb(20 23 26 / .08);
+  color-scheme: light;
+}
+:root[data-palette="clay"] {
+  --bg:          #F1EDE9;
+  --surface:     #FFFFFF;
+  --surface-2:   #F8F5F2;
+  --ink:         #1B1714;
+  --ink-2:       #4E4640;
+  --muted:       #756A64;
+  --muted-2:     #817874;
+  --hair:        #E4DDD7;
+  --hair-soft:   #EEE9E4;
+  --accent:      #A9503A;
+  --accent-hi:   #8E4130;
+  --accent-soft: #F6E6E0;
+  --on-accent:   #FFFFFF;
+  --member-a:    #A9503A;
+  --member-b:    #1B1714;
+  --on-member-b: #FFFFFF;
+  --shadow-sm: 0 1px 2px rgb(20 23 26 / .05), 0 1px 1px rgb(20 23 26 / .04);
+  --shadow-md: 0 8px 24px -8px rgb(20 23 26 / .14), 0 2px 6px -2px rgb(20 23 26 / .06);
+  --shadow-lg: 0 24px 60px -18px rgb(20 23 26 / .28), 0 4px 12px -4px rgb(20 23 26 / .08);
   color-scheme: light;
 }
 
+/* ---------- 深色：跟随系统 ---------- */
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
+  :root:not([data-theme="light"]),
+  :root[data-palette="cobalt"]:not([data-theme="light"]) {
     --bg:          #0D0F11;
     --surface:     #16191C;
     --surface-2:   #1C2024;
@@ -53,12 +134,79 @@
     --muted-2:     #6C7278;
     --hair:        #262A2E;
     --hair-soft:   #1F2327;
-
     --accent:      #6E8CF7;
     --accent-hi:   #8AA2F9;
     --accent-soft: #1B2340;
     --on-accent:   #0D0F11;
-
+    --member-a:    #6E8CF7;
+    --member-b:    #E9EBE8;
+    --on-member-b: #000000;
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / .4);
+    --shadow-md: 0 8px 24px -8px rgb(0 0 0 / .6), 0 2px 6px -2px rgb(0 0 0 / .4);
+    --shadow-lg: 0 24px 60px -18px rgb(0 0 0 / .8), 0 4px 12px -4px rgb(0 0 0 / .5);
+    color-scheme: dark;
+  }
+    :root[data-palette="celadon"]:not([data-theme="light"]) {
+    --bg:          #0B100E;
+    --surface:     #131A17;
+    --surface-2:   #18211D;
+    --ink:         #E6ECE9;
+    --ink-2:       #B2BEB9;
+    --muted:       #84908B;
+    --muted-2:     #66726D;
+    --hair:        #232C28;
+    --hair-soft:   #1C2420;
+    --accent:      #58B79C;
+    --accent-hi:   #74C9B0;
+    --accent-soft: #12302A;
+    --on-accent:   #08100D;
+    --member-a:    #58B79C;
+    --member-b:    #E6ECE9;
+    --on-member-b: #000000;
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / .4);
+    --shadow-md: 0 8px 24px -8px rgb(0 0 0 / .6), 0 2px 6px -2px rgb(0 0 0 / .4);
+    --shadow-lg: 0 24px 60px -18px rgb(0 0 0 / .8), 0 4px 12px -4px rgb(0 0 0 / .5);
+    color-scheme: dark;
+  }
+    :root[data-palette="ink"]:not([data-theme="light"]) {
+    --bg:          #0E0E0D;
+    --surface:     #171716;
+    --surface-2:   #1D1D1B;
+    --ink:         #EAE8E3;
+    --ink-2:       #B8B5AE;
+    --muted:       #8A8781;
+    --muted-2:     #75726D;
+    --hair:        #272725;
+    --hair-soft:   #1F1F1D;
+    --accent:      #EAE8E3;
+    --accent-hi:   #FFFFFF;
+    --accent-soft: #2A2A27;
+    --on-accent:   #0E0E0D;
+    --member-a:    #EAE8E3;
+    --member-b:    #C0A87F;
+    --on-member-b: #000000;
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / .4);
+    --shadow-md: 0 8px 24px -8px rgb(0 0 0 / .6), 0 2px 6px -2px rgb(0 0 0 / .4);
+    --shadow-lg: 0 24px 60px -18px rgb(0 0 0 / .8), 0 4px 12px -4px rgb(0 0 0 / .5);
+    color-scheme: dark;
+  }
+    :root[data-palette="clay"]:not([data-theme="light"]) {
+    --bg:          #110E0C;
+    --surface:     #1A1614;
+    --surface-2:   #211C19;
+    --ink:         #EDE8E4;
+    --ink-2:       #BDB3AC;
+    --muted:       #8E837C;
+    --muted-2:     #786E69;
+    --hair:        #2A2421;
+    --hair-soft:   #221D1A;
+    --accent:      #D8836A;
+    --accent-hi:   #E59C86;
+    --accent-soft: #33201A;
+    --on-accent:   #110E0C;
+    --member-a:    #D8836A;
+    --member-b:    #EDE8E4;
+    --on-member-b: #000000;
     --shadow-sm: 0 1px 2px rgb(0 0 0 / .4);
     --shadow-md: 0 8px 24px -8px rgb(0 0 0 / .6), 0 2px 6px -2px rgb(0 0 0 / .4);
     --shadow-lg: 0 24px 60px -18px rgb(0 0 0 / .8), 0 4px 12px -4px rgb(0 0 0 / .5);
@@ -66,6 +214,7 @@
   }
 }
 
+/* ---------- 深色：手动强制 ---------- */
 :root[data-theme="dark"] {
   --bg:          #0D0F11;
   --surface:     #16191C;
@@ -80,6 +229,75 @@
   --accent-hi:   #8AA2F9;
   --accent-soft: #1B2340;
   --on-accent:   #0D0F11;
+  --member-a:    #6E8CF7;
+  --member-b:    #E9EBE8;
+  --on-member-b: #000000;
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / .4);
+  --shadow-md: 0 8px 24px -8px rgb(0 0 0 / .6), 0 2px 6px -2px rgb(0 0 0 / .4);
+  --shadow-lg: 0 24px 60px -18px rgb(0 0 0 / .8), 0 4px 12px -4px rgb(0 0 0 / .5);
+  color-scheme: dark;
+}
+:root[data-palette="celadon"][data-theme="dark"] {
+  --bg:          #0B100E;
+  --surface:     #131A17;
+  --surface-2:   #18211D;
+  --ink:         #E6ECE9;
+  --ink-2:       #B2BEB9;
+  --muted:       #84908B;
+  --muted-2:     #66726D;
+  --hair:        #232C28;
+  --hair-soft:   #1C2420;
+  --accent:      #58B79C;
+  --accent-hi:   #74C9B0;
+  --accent-soft: #12302A;
+  --on-accent:   #08100D;
+  --member-a:    #58B79C;
+  --member-b:    #E6ECE9;
+  --on-member-b: #000000;
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / .4);
+  --shadow-md: 0 8px 24px -8px rgb(0 0 0 / .6), 0 2px 6px -2px rgb(0 0 0 / .4);
+  --shadow-lg: 0 24px 60px -18px rgb(0 0 0 / .8), 0 4px 12px -4px rgb(0 0 0 / .5);
+  color-scheme: dark;
+}
+:root[data-palette="ink"][data-theme="dark"] {
+  --bg:          #0E0E0D;
+  --surface:     #171716;
+  --surface-2:   #1D1D1B;
+  --ink:         #EAE8E3;
+  --ink-2:       #B8B5AE;
+  --muted:       #8A8781;
+  --muted-2:     #75726D;
+  --hair:        #272725;
+  --hair-soft:   #1F1F1D;
+  --accent:      #EAE8E3;
+  --accent-hi:   #FFFFFF;
+  --accent-soft: #2A2A27;
+  --on-accent:   #0E0E0D;
+  --member-a:    #EAE8E3;
+  --member-b:    #C0A87F;
+  --on-member-b: #000000;
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / .4);
+  --shadow-md: 0 8px 24px -8px rgb(0 0 0 / .6), 0 2px 6px -2px rgb(0 0 0 / .4);
+  --shadow-lg: 0 24px 60px -18px rgb(0 0 0 / .8), 0 4px 12px -4px rgb(0 0 0 / .5);
+  color-scheme: dark;
+}
+:root[data-palette="clay"][data-theme="dark"] {
+  --bg:          #110E0C;
+  --surface:     #1A1614;
+  --surface-2:   #211C19;
+  --ink:         #EDE8E4;
+  --ink-2:       #BDB3AC;
+  --muted:       #8E837C;
+  --muted-2:     #786E69;
+  --hair:        #2A2421;
+  --hair-soft:   #221D1A;
+  --accent:      #D8836A;
+  --accent-hi:   #E59C86;
+  --accent-soft: #33201A;
+  --on-accent:   #110E0C;
+  --member-a:    #D8836A;
+  --member-b:    #EDE8E4;
+  --on-member-b: #000000;
   --shadow-sm: 0 1px 2px rgb(0 0 0 / .4);
   --shadow-md: 0 8px 24px -8px rgb(0 0 0 / .6), 0 2px 6px -2px rgb(0 0 0 / .4);
   --shadow-lg: 0 24px 60px -18px rgb(0 0 0 / .8), 0 4px 12px -4px rgb(0 0 0 / .5);
@@ -337,8 +555,8 @@ img { max-width: 100%; display: block; }
   letter-spacing: -.01em;
   flex: none;
 }
-.avatar--a { background: var(--accent); color: var(--on-accent); }
-.avatar--b { background: var(--ink); color: var(--surface); }
+.avatar--a { background: var(--member-a); color: var(--on-accent); }
+.avatar--b { background: var(--member-b); color: var(--on-member-b); }
 .avatar--sm { width: 22px; height: 22px; font-size: 10px; }
 
 /* ---------- 币种切换 ---------- */
@@ -1124,4 +1342,49 @@ button.listrow:hover { background: var(--surface-2); }
   letter-spacing: .1em;
   color: var(--accent);
   word-break: break-all;
+}
+
+/* ==========================================================================
+   配色选择
+   ========================================================================== */
+.swatches {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.swatch {
+  display: grid;
+  justify-items: center;
+  gap: 7px;
+  padding: 13px 6px 11px;
+  border-radius: var(--r-tile);
+  background: var(--surface);
+  border: 1px solid var(--hair);
+  transition: border-color .16s var(--ease), transform .12s var(--ease), box-shadow .16s var(--ease);
+}
+.swatch:active { transform: scale(.96); }
+.swatch[aria-checked="true"] {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.swatch__chip {
+  display: flex;
+  width: 38px; height: 38px;
+  border-radius: var(--r-pill);
+  overflow: hidden;
+  border: 1px solid var(--hair-soft);
+}
+.swatch__chip i { flex: 1; }
+.swatch__name {
+  font-size: 12.5px;
+  font-weight: 550;
+  letter-spacing: -.01em;
+  color: var(--ink);
+}
+.swatch__hint { font-size: 10.5px; color: var(--muted); }
+.swatch[aria-checked="true"] .swatch__name { color: var(--accent); }
+
+@media (max-width: 359px) {
+  .swatches { grid-template-columns: repeat(2, 1fr); }
 }

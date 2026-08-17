@@ -89,6 +89,12 @@ export TALLY_MODEL=claude-sonnet-5
 - 回到页面时、有网时、每 90 秒各拉一次。记账不需要 websocket
 - **显示币种不同步**：Chloe 可以看 HKD，Wen 同时看 GBP，底下是同一笔账
 
+**外观**
+- 四套配色：钴蓝（冷静克制）/ 青瓷（清新）/ 墨（近乎单色）/ 赤陶（温暖大气）
+- 明暗三档：跟随系统 / 强制浅色 / 强制深色
+- 都是本机设置，不跟着账本同步——两个人可以各挑各的
+- 所有配色 × 明暗共 8 种组合都跑过 WCAG AA 校验（正文 4.5:1，三级文字 3.5:1）
+
 **汇率**
 - 来自欧洲央行（通过 frankfurter.dev），每天首次打开时取一次，之后走本地缓存
 - 取不到就退回内置的离线汇率，界面上会明确标出来
@@ -97,7 +103,7 @@ export TALLY_MODEL=claude-sonnet-5
 
 ## 数据在哪
 
-**没开同步时**：账目只存在浏览器的 `localStorage`（key 是 `tally.state.v1`），不上传任何地方。
+**没开同步时**：账目只存在浏览器的 `localStorage`（key 是 `wetab.state.v1`），不上传任何地方。
 
 **开了同步之后**：账目存在 Supabase。两张表的 RLS 全部锁死，anon key 碰不到表，
 所有读写必须走 `tally_create / tally_pull / tally_push` 三个 security definer 函数，
@@ -116,8 +122,8 @@ export TALLY_MODEL=claude-sonnet-5
 
 ```
 index.html                    外壳（在仓库根目录，GitHub Pages 直接托管）
-styles.css                    设计系统（颜色 token、深色模式、全部组件）
-  app.js                      全部逻辑：状态、汇率换算、结算、三个视图、表单、识别、同步
+styles.css                    设计系统（四套配色 token、明暗、全部组件）
+app.js                        全部逻辑：状态、汇率换算、结算、三个视图、表单、识别、同步、外观
 config.js                     Supabase 连接、小票识别端点、汇率地址
 sprite.svg                    Phosphor 图标合成的 sprite（由 icons/ 重建，不要手改）
 icons/                        原始 Phosphor SVG
@@ -140,11 +146,12 @@ python3 -c "import re,pathlib; d=pathlib.Path('icons'); out=['<svg xmlns=\"http:
 
 ## 设计上定死的几条
 
-- 一个强调色：钴蓝 `#2F53D6`（深色模式 `#6E8CF7`）。两个人用「强调色 / 墨色」两个头像色区分，不引入第三种颜色。
+- 每套配色只有一个强调色，不引入第二个装饰色。两个人的头像色是独立 token（`--member-a` / `--member-b`）——「墨」这套的强调色就是墨色本身，沿用「强调色 + 墨色」两个人会撞成一样。
+- 配色的对比度不是靠眼睛定的：`--muted` 这类弱化文字最初在四套里都不达标（钴蓝只有 3.57:1），是脚本按 WCAG 阈值自动加深后再复验的。
 - 圆角只有四档：卡片 18px、输入 12px、图标底 14px、按钮和胶囊全圆。
 - 所有数字用等宽字体 + `tabular-nums`，金额上下对齐、切币种时不跳动。
 - 字体全用系统字体栈（iOS 上就是 SF Pro / SF Mono），不加载任何网络字体，首屏没有闪字。
-- 深色模式跟随系统，两套颜色都验过对比度。
+- 明暗默认跟随系统，也可以强制。配色写在 `<html data-palette>`，明暗写在 `data-theme`，互不干扰。
 - 动效只有三处：列表首次进场、抽屉弹出、统计条形展开。都受 `prefers-reduced-motion` 控制，关掉动效后直接是静态。列表进场只在首屏跑一次，切币种和增删记录不重播。
 
 ---
