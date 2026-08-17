@@ -47,12 +47,40 @@ create table if not exists public.entries (
   merchant   text,
   note       text,
   entry_date date not null,
-  split      text not null default 'even',         -- 'even' | 'payer' | 'other'
+  split      text,                                 -- 两人时代的遗留列，只读不写
+  participants jsonb,                              -- 这笔由谁分摊（多人）
+  to_id      text,                                 -- 结算：转给谁
   trip_id    text,
   deleted    boolean not null default false,
   created_at bigint,                               -- 客户端时间戳，仅用于同日排序
   updated_at timestamptz not null default now()
 );
+
+-- 多人支持：participants 是这笔由谁分摊，to_id 是结算转给谁。
+-- 老库直接跑这段就能升级，旧行由下面的 update 就地迁移。
+alter table public.entries add column if not exists participants jsonb;
+alter table public.entries add column if not exists to_id text;
+
+-- 旧行迁移：split 三选一 → participants 集合。只跑一次，之后 participants 非空就跳过。
+update public.entries e set participants = (
+  case
+    when e.type = 'settle' then '[]'::jsonb
+    when e.split = 'payer'  then jsonb_build_array(e.payer_id)
+    when e.split = 'other'  then (
+      select coalesce(jsonb_agg(m->>'id'), '[]'::jsonb)
+      from ledgers l, jsonb_array_elements(l.members) m
+      where l.id = e.ledger_id and m->>'id' <> e.payer_id)
+    else (
+      select coalesce(jsonb_agg(m->>'id'), '[]'::jsonb)
+      from ledgers l, jsonb_array_elements(l.members) m
+      where l.id = e.ledger_id)
+  end)
+where e.participants is null;
+
+update public.entries e set to_id = (
+  select m->>'id' from ledgers l, jsonb_array_elements(l.members) m
+  where l.id = e.ledger_id and m->>'id' <> e.payer_id limit 1)
+where e.type = 'settle' and e.to_id is null;
 
 -- 增量拉取靠这两个索引
 create index if not exists entries_ledger_updated_idx on public.entries (ledger_id, updated_at);
@@ -154,7 +182,8 @@ begin
       select jsonb_agg(jsonb_build_object(
         'id', e.id, 'type', e.type, 'payerId', e.payer_id, 'amount', e.amount,
         'currency', e.currency, 'cat', e.cat, 'merchant', e.merchant, 'note', e.note,
-        'date', e.entry_date, 'split', e.split, 'tripId', e.trip_id,
+        'date', e.entry_date, 'participants', coalesce(e.participants, '[]'::jsonb),
+        'toId', e.to_id, 'tripId', e.trip_id,
         'deleted', e.deleted, 'createdAt', e.created_at, 'updatedAt', e.updated_at))
       from entries e where e.ledger_id = v_id and e.updated_at > v_since
     ), '[]'::jsonb)
@@ -196,19 +225,21 @@ begin
 
   for r in select * from jsonb_array_elements(coalesce(p_entries, '[]'::jsonb)) loop
     insert into entries (id, ledger_id, type, payer_id, amount, currency, cat,
-                         merchant, note, entry_date, split, trip_id, deleted,
-                         created_at, updated_at)
+                         merchant, note, entry_date, participants, to_id, trip_id,
+                         deleted, created_at, updated_at)
     values (
       r->>'id', v_id, coalesce(r->>'type', 'expense'), r->>'payerId',
       (r->>'amount')::numeric, r->>'currency', nullif(r->>'cat', ''),
       nullif(r->>'merchant', ''), nullif(r->>'note', ''), (r->>'date')::date,
-      coalesce(r->>'split', 'even'), nullif(r->>'tripId', ''),
+      coalesce(r->'participants', '[]'::jsonb), nullif(r->>'toId', ''),
+      nullif(r->>'tripId', ''),
       coalesce((r->>'deleted')::boolean, false),
       nullif(r->>'createdAt', '')::bigint, now())
     on conflict (id) do update set
       type = excluded.type, payer_id = excluded.payer_id, amount = excluded.amount,
       currency = excluded.currency, cat = excluded.cat, merchant = excluded.merchant,
-      note = excluded.note, entry_date = excluded.entry_date, split = excluded.split,
+      note = excluded.note, entry_date = excluded.entry_date,
+      participants = excluded.participants, to_id = excluded.to_id,
       trip_id = excluded.trip_id, deleted = excluded.deleted, updated_at = now()
     where entries.ledger_id = v_id;
   end loop;

@@ -539,8 +539,8 @@ img { max-width: 100%; display: block; }
   padding-top: 16px;
   border-top: 1px solid var(--hair-soft);
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: 14px 12px;
 }
 .who { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .who__name { font-size: 12.5px; color: var(--muted); }
@@ -555,8 +555,14 @@ img { max-width: 100%; display: block; }
   letter-spacing: -.01em;
   flex: none;
 }
-.avatar--a { background: var(--member-a); color: var(--on-accent); }
-.avatar--b { background: var(--member-b); color: var(--on-member-b); }
+.avatar--m0 { background: var(--member-0); color: var(--on-member-0); }
+.avatar--m1 { background: var(--member-1); color: var(--on-member-1); }
+.avatar--m2 { background: var(--member-2); color: var(--on-member-2); }
+.avatar--m3 { background: var(--member-3); color: var(--on-member-3); }
+.avatar--m4 { background: var(--member-4); color: var(--on-member-4); }
+.avatar--m5 { background: var(--member-5); color: var(--on-member-5); }
+.avatar--m6 { background: var(--member-6); color: var(--on-member-6); }
+.avatar--m7 { background: var(--member-7); color: var(--on-member-7); }
 .avatar--sm { width: 22px; height: 22px; font-size: 10px; }
 
 /* ---------- 币种切换 ---------- */
@@ -1415,3 +1421,214 @@ button.listrow:hover { background: var(--surface-2); }
   .namepair { grid-template-columns: 1fr 1fr; }
   .namepair__roll { grid-column: 1 / -1; width: 100%; }
 }
+
+/* ==========================================================================
+   成员头像色
+   0 号是强调色，1 号是墨色，其余从强调色绕色相环取，饱和度明度对齐，
+   所以加到第 8 个人也不会有哪个颜色跳出这套配色。
+   每个色上的字（白或近黑）都跑过 WCAG AA。
+   ========================================================================== */
+:root,
+:root[data-palette="cobalt"] {
+  --member-0: #2F53D6; --on-member-0: #FFFFFF;
+  --member-1: #14171A; --on-member-1: #FFFFFF;
+  --member-2: #9238D8; --on-member-2: #FFFFFF;
+  --member-3: #D52A8A; --on-member-3: #FFFFFF;
+  --member-4: #D25D29; --on-member-4: #111111;
+  --member-5: #BCD838; --on-member-5: #111111;
+  --member-6: #2FD636; --on-member-6: #111111;
+  --member-7: #29D2C3; --on-member-7: #111111;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]),
+  :root[data-palette="cobalt"]:not([data-theme="light"]) {
+    --member-0: #6E8CF7; --on-member-0: #111111;
+    --member-1: #E9EBE8; --on-member-1: #111111;
+    --member-2: #B25BF6; --on-member-2: #111111;
+    --member-3: #F76EBC; --on-member-3: #111111;
+    --member-4: #F8A581; --on-member-4: #111111;
+    --member-5: #DBF65B; --on-member-5: #111111;
+    --member-6: #6EF774; --on-member-6: #111111;
+    --member-7: #81F8EE; --on-member-7: #111111;
+  }
+}
+:root[data-theme="dark"] {
+  --member-0: #6E8CF7; --on-member-0: #111111;
+  --member-1: #E9EBE8; --on-member-1: #111111;
+  --member-2: #B25BF6; --on-member-2: #111111;
+  --member-3: #F76EBC; --on-member-3: #111111;
+  --member-4: #F8A581; --on-member-4: #111111;
+  --member-5: #DBF65B; --on-member-5: #111111;
+  --member-6: #6EF774; --on-member-6: #111111;
+  --member-7: #81F8EE; --on-member-7: #111111;
+}
+:root[data-palette="celadon"] {
+  --member-0: #2E7D6A; --on-member-0: #FFFFFF;
+  --member-1: #131A17; --on-member-1: #FFFFFF;
+  --member-2: #315784; --on-member-2: #FFFFFF;
+  --member-3: #4E2E7D; --on-member-3: #FFFFFF;
+  --member-4: #762B61; --on-member-4: #FFFFFF;
+  --member-5: #843D31; --on-member-5: #FFFFFF;
+  --member-6: #77792C; --on-member-6: #FFFFFF;
+  --member-7: #33762B; --on-member-7: #FFFFFF;
+}
+@media (prefers-color-scheme: dark) {
+    :root[data-palette="celadon"]:not([data-theme="light"]) {
+    --member-0: #58B79C; --on-member-0: #111111;
+    --member-1: #E6ECE9; --on-member-1: #111111;
+    --member-2: #4778A6; --on-member-2: #FFFFFF;
+    --member-3: #7B58B7; --on-member-3: #FFFFFF;
+    --member-4: #BD66A9; --on-member-4: #111111;
+    --member-5: #AF564B; --on-member-5: #FFFFFF;
+    --member-6: #B7B558; --on-member-6: #111111;
+    --member-7: #74BD66; --on-member-7: #111111;
+  }
+}
+:root[data-palette="celadon"][data-theme="dark"] {
+  --member-0: #58B79C; --on-member-0: #111111;
+  --member-1: #E6ECE9; --on-member-1: #111111;
+  --member-2: #4778A6; --on-member-2: #FFFFFF;
+  --member-3: #7B58B7; --on-member-3: #FFFFFF;
+  --member-4: #BD66A9; --on-member-4: #111111;
+  --member-5: #AF564B; --on-member-5: #FFFFFF;
+  --member-6: #B7B558; --on-member-6: #111111;
+  --member-7: #74BD66; --on-member-7: #111111;
+}
+:root[data-palette="ink"] {
+  --member-0: #171614; --on-member-0: #FFFFFF;
+  --member-1: #171614; --on-member-1: #FFFFFF;
+  --member-2: #4A5D32; --on-member-2: #FFFFFF;
+  --member-3: #325D40; --on-member-3: #FFFFFF;
+  --member-4: #32555D; --on-member-4: #FFFFFF;
+  --member-5: #34325D; --on-member-5: #FFFFFF;
+  --member-6: #5A325D; --on-member-6: #FFFFFF;
+  --member-7: #5D323B; --on-member-7: #FFFFFF;
+}
+@media (prefers-color-scheme: dark) {
+    :root[data-palette="ink"]:not([data-theme="light"]) {
+    --member-0: #EAE8E3; --on-member-0: #111111;
+    --member-1: #EAE8E3; --on-member-1: #111111;
+    --member-2: #BDD1A9; --on-member-2: #111111;
+    --member-3: #A9D1B7; --on-member-3: #111111;
+    --member-4: #A9C7D1; --on-member-4: #111111;
+    --member-5: #ADA9D1; --on-member-5: #111111;
+    --member-6: #D0A9D1; --on-member-6: #111111;
+    --member-7: #D1A9AF; --on-member-7: #111111;
+  }
+}
+:root[data-palette="ink"][data-theme="dark"] {
+  --member-0: #EAE8E3; --on-member-0: #111111;
+  --member-1: #EAE8E3; --on-member-1: #111111;
+  --member-2: #BDD1A9; --on-member-2: #111111;
+  --member-3: #A9D1B7; --on-member-3: #111111;
+  --member-4: #A9C7D1; --on-member-4: #111111;
+  --member-5: #ADA9D1; --on-member-5: #111111;
+  --member-6: #D0A9D1; --on-member-6: #111111;
+  --member-7: #D1A9AF; --on-member-7: #111111;
+}
+:root[data-palette="clay"] {
+  --member-0: #A9503A; --on-member-0: #FFFFFF;
+  --member-1: #1B1714; --on-member-1: #FFFFFF;
+  --member-2: #B1AE3D; --on-member-2: #111111;
+  --member-3: #4BA93A; --on-member-3: #111111;
+  --member-4: #37A184; --on-member-4: #111111;
+  --member-5: #3D6CB1; --on-member-5: #FFFFFF;
+  --member-6: #6D3AA9; --on-member-6: #FFFFFF;
+  --member-7: #A1377F; --on-member-7: #FFFFFF;
+}
+@media (prefers-color-scheme: dark) {
+    :root[data-palette="clay"]:not([data-theme="light"]) {
+    --member-0: #D8836A; --on-member-0: #111111;
+    --member-1: #EDE8E4; --on-member-1: #111111;
+    --member-2: #D3D45A; --on-member-2: #111111;
+    --member-3: #77D86A; --on-member-3: #111111;
+    --member-4: #7ADCC3; --on-member-4: #111111;
+    --member-5: #5A89D4; --on-member-5: #111111;
+    --member-6: #A06AD8; --on-member-6: #111111;
+    --member-7: #DC7AB9; --on-member-7: #111111;
+  }
+}
+:root[data-palette="clay"][data-theme="dark"] {
+  --member-0: #D8836A; --on-member-0: #111111;
+  --member-1: #EDE8E4; --on-member-1: #111111;
+  --member-2: #D3D45A; --on-member-2: #111111;
+  --member-3: #77D86A; --on-member-3: #111111;
+  --member-4: #7ADCC3; --on-member-4: #111111;
+  --member-5: #5A89D4; --on-member-5: #111111;
+  --member-6: #A06AD8; --on-member-6: #111111;
+  --member-7: #DC7AB9; --on-member-7: #111111;
+}
+
+/* ==========================================================================
+   多人：转账建议 · 分摊人多选
+   ========================================================================== */
+.moves { margin-top: 12px; display: grid; gap: 2px; }
+.move {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 0;
+  font-size: 13.5px;
+}
+.move + .move { border-top: 1px solid var(--hair-soft); }
+.move__arrow { display: flex; color: var(--muted-2); }
+.move__arrow .icon { width: 13px; height: 13px; }
+.move__who {
+  margin-left: 5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+.move__amt { font-weight: 560; letter-spacing: -.02em; white-space: nowrap; }
+
+/* 结算弹层里可点的建议行 */
+.movelist { display: grid; gap: 8px; }
+.movepick {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 11px 13px;
+  border-radius: var(--r-input);
+  background: var(--surface);
+  border: 1px solid var(--hair);
+  font-size: 13.5px;
+  text-align: left;
+  transition: border-color .16s var(--ease), background .16s var(--ease);
+}
+.movepick:active { transform: scale(.99); }
+.movepick[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.movepick__who {
+  margin-left: 5px; flex: 1; min-width: 0;
+  color: var(--ink-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.movepick[aria-pressed="true"] .movepick__who { color: var(--accent); }
+.movepick__amt { font-weight: 560; letter-spacing: -.02em; white-space: nowrap; }
+
+/* 人多了就换行，不再是固定两列 */
+.pick--wrap {
+  display: flex;
+  flex-wrap: wrap;
+  grid-template-columns: none;
+}
+.pick--wrap .pickbtn {
+  flex: 1 1 calc(50% - 4px);
+  min-width: 108px;
+  padding: 0 12px;
+}
+
+.linkbtn {
+  font-size: 12px;
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.linkbtn:active { opacity: .6; }

@@ -134,14 +134,17 @@ function seedTrips() {
 
 function seed() {
   const d = dback;
+  const ids = state.members.map((m) => m.id);
+  const ALL = () => ids.slice();
+  const ONLY = (id) => [id];
   return [
-    { id: uid(), type: 'expense', payerId: 'a', amount: 486,  currency: 'HKD', cat: 'food',    merchant: '添好運 深水埗', note: '午飯',       date: d(0), split: 'even', tripId: null, createdAt: Date.now() - 1e5 },
-    { id: uid(), type: 'expense', payerId: 'b', amount: 128,  currency: 'HKD', cat: 'transit', merchant: '的士 尖沙咀→中環', note: '',       date: d(0), split: 'even', tripId: null, createdAt: Date.now() - 2e5 },
-    { id: uid(), type: 'expense', payerId: 'b', amount: 32.4, currency: 'GBP', cat: 'shop',    merchant: 'Boots',        note: '防曬同藥',   date: d(1), split: 'even', tripId: null, createdAt: Date.now() - 9e6 },
-    { id: uid(), type: 'expense', payerId: 'a', amount: 1240, currency: 'CNY', cat: 'stay',    merchant: '深圳灣民宿',     note: '兩晚',      date: d(2), split: 'even', tripId: 't-sz', createdAt: Date.now() - 2e7 },
-    { id: uid(), type: 'expense', payerId: 'a', amount: 268,  currency: 'HKD', cat: 'fun',     merchant: 'Broadway 戲院',  note: '',         date: d(3), split: 'even', tripId: null, createdAt: Date.now() - 3e7 },
-    { id: uid(), type: 'expense', payerId: 'b', amount: 74.5, currency: 'HKD', cat: 'daily',   merchant: '惠康超市',       note: '',         date: d(4), split: 'even', tripId: null, createdAt: Date.now() - 4e7 },
-    { id: uid(), type: 'expense', payerId: 'a', amount: 9800, currency: 'JPY', cat: 'food',    merchant: '鮨 銀座おのでら', note: '生日飯',   date: d(6), split: 'other', tripId: 't-tokyo', createdAt: Date.now() - 6e7 },
+    { id: uid(), type: 'expense', payerId: 'a', amount: 486,  currency: 'HKD', cat: 'food',    merchant: '添好運 深水埗', note: '午飯',       date: d(0), participants: ALL(), tripId: null, createdAt: Date.now() - 1e5 },
+    { id: uid(), type: 'expense', payerId: 'b', amount: 128,  currency: 'HKD', cat: 'transit', merchant: '的士 尖沙咀→中環', note: '',       date: d(0), participants: ALL(), tripId: null, createdAt: Date.now() - 2e5 },
+    { id: uid(), type: 'expense', payerId: 'b', amount: 32.4, currency: 'GBP', cat: 'shop',    merchant: 'Boots',        note: '防曬同藥',   date: d(1), participants: ALL(), tripId: null, createdAt: Date.now() - 9e6 },
+    { id: uid(), type: 'expense', payerId: 'a', amount: 1240, currency: 'CNY', cat: 'stay',    merchant: '深圳灣民宿',     note: '兩晚',      date: d(2), participants: ALL(), tripId: 't-sz', createdAt: Date.now() - 2e7 },
+    { id: uid(), type: 'expense', payerId: 'a', amount: 268,  currency: 'HKD', cat: 'fun',     merchant: 'Broadway 戲院',  note: '',         date: d(3), participants: ALL(), tripId: null, createdAt: Date.now() - 3e7 },
+    { id: uid(), type: 'expense', payerId: 'b', amount: 74.5, currency: 'HKD', cat: 'daily',   merchant: '惠康超市',       note: '',         date: d(4), participants: ALL(), tripId: null, createdAt: Date.now() - 4e7 },
+    { id: uid(), type: 'expense', payerId: 'a', amount: 9800, currency: 'JPY', cat: 'food',    merchant: '鮨 銀座おのでら', note: '生日飯',   date: d(6), participants: ONLY(ids[1]), tripId: 't-tokyo', createdAt: Date.now() - 6e7 },
   ];
 }
 
@@ -168,6 +171,10 @@ const DEFAULT_STATE = (() => {
   };
 })();
 
+const MAX_MEMBERS = 8;
+const liveMembers = () => state.members.filter((m) => !m.removed);
+const memberIndex = (id) => state.members.findIndex((m) => m.id === id);
+
 /* 当前筛选：'all' 全部 · 'daily' 没归到项目的日常 · 其余是 trip id */
 let activeTrip = 'all';
 
@@ -179,7 +186,10 @@ function load() {
     if (!raw) return structuredClone(DEFAULT_STATE);
     const s = JSON.parse(raw);
     // 已经有存档的人不该再被引导一次
-    return { ...structuredClone(DEFAULT_STATE), onboarded: true, ...s };
+    const st = { ...structuredClone(DEFAULT_STATE), onboarded: true, ...s };
+    const ids = st.members.map((m) => m.id);
+    st.expenses.forEach((e) => migrateSplit(e, ids));
+    return st;
   } catch {
     return structuredClone(DEFAULT_STATE);
   }
@@ -204,6 +214,22 @@ function touch(rec) {
 function touchMeta() { state.metaDirty = true; }
 
 const liveExpenses = () => state.expenses.filter((e) => !e.deleted);
+
+/* 两人时代的 split 三选一，到多人就是「这笔由谁分摊」的集合。
+   even  → 所有人      payer → 只有付款人      other → 除付款人以外的人
+   读档时就地迁移一次，之后只认 participants。 */
+function migrateSplit(e, memberIds) {
+  if (Array.isArray(e.participants)) return e;
+  const others = memberIds.filter((id) => id !== e.payerId);
+  e.participants =
+    e.type === 'settle' ? []
+    : e.split === 'payer' ? [e.payerId]
+    : e.split === 'other' ? others
+    : memberIds.slice();
+  if (e.type === 'settle' && !e.toId) e.toId = others[0] || null;
+  delete e.split;
+  return e;
+}
 const liveTrips    = () => state.trips.filter((t) => !t.deleted);
 
 const memberName = (id) => (state.members.find((m) => m.id === id) || {}).name || '?';
@@ -212,32 +238,70 @@ const initial = (name) => (name || '?').trim().slice(0, 1).toUpperCase();
 /* ==========================================================================
    结算计算
    ========================================================================== */
-/** 返回 a 为 b 垫付的净额（显示币种）。负数表示 b 为 a 垫得多。 */
-function balance(list = liveExpenses(), cur = state.display) {
-  let net = 0;
+/**
+ * 每个人的净额（显示币种）。正数 = 别人欠他，负数 = 他欠别人。
+ * 所有人加起来恒为 0，这是这套账最基本的自洽性。
+ */
+function balances(list = liveExpenses(), cur = state.display) {
+  const net = {};
+  for (const m of state.members) net[m.id] = 0;
+
   for (const e of list) {
     const v = convert(e.amount, e.currency, cur);
+
     if (e.type === 'settle') {
-      // 补款：payer 把钱转给对方，直接抵消垫付
-      net += e.payerId === 'a' ? v : -v;
+      // 转账：付的人净额上升，收的人下降
+      if (net[e.payerId] === undefined) continue;
+      net[e.payerId] += v;
+      if (net[e.toId] !== undefined) net[e.toId] -= v;
       continue;
     }
-    const otherShare = e.split === 'even' ? v / 2 : e.split === 'other' ? v : 0;
-    net += e.payerId === 'a' ? otherShare : -otherShare;
+
+    const parts = (e.participants || []).filter((id) => net[id] !== undefined);
+    if (!parts.length || net[e.payerId] === undefined) continue;
+    const share = v / parts.length;
+    net[e.payerId] += v;                          // 他垫了全款
+    for (const id of parts) net[id] -= share;     // 每个分摊人各欠一份
   }
   return net;
 }
 
+/**
+ * 把净额化成「谁转给谁多少」。贪心：金额最大的债务人先还给金额最大的债权人。
+ * 不保证笔数理论最优（那是 NP 难的），但一定不超过 N-1 笔，够用。
+ */
+function settlements(net) {
+  const owe = [], due = [];
+  for (const m of state.members) {
+    const v = net[m.id] || 0;
+    if (v < -0.005) owe.push({ id: m.id, v: -v });
+    else if (v > 0.005) due.push({ id: m.id, v });
+  }
+  owe.sort((a, b) => b.v - a.v);
+  due.sort((a, b) => b.v - a.v);
+
+  const out = [];
+  let i = 0, j = 0;
+  while (i < owe.length && j < due.length) {
+    const amt = Math.min(owe[i].v, due[j].v);
+    out.push({ from: owe[i].id, to: due[j].id, amount: amt });
+    owe[i].v -= amt; due[j].v -= amt;
+    if (owe[i].v < 0.005) i++;
+    if (due[j].v < 0.005) j++;
+  }
+  return out;
+}
+
 /** 每人实际承担的总额（显示币种），不含结算记录 */
 function personTotals(list, cur = state.display) {
-  const out = { a: 0, b: 0 };
+  const out = {};
+  for (const m of state.members) out[m.id] = 0;
   for (const e of list) {
     if (e.type === 'settle') continue;
-    const v = convert(e.amount, e.currency, cur);
-    const other = e.payerId === 'a' ? 'b' : 'a';
-    if (e.split === 'even') { out[e.payerId] += v / 2; out[other] += v / 2; }
-    else if (e.split === 'other') { out[other] += v; }
-    else { out[e.payerId] += v; }
+    const parts = (e.participants || []).filter((id) => out[id] !== undefined);
+    if (!parts.length) continue;
+    const share = convert(e.amount, e.currency, cur) / parts.length;
+    for (const id of parts) out[id] += share;
   }
   return out;
 }
@@ -267,7 +331,7 @@ function tripSummary(trip, cur = state.display) {
     count: spend.length,
     total: spend.reduce((s, e) => s + convert(e.amount, e.currency, cur), 0),
     totals: personTotals(list, cur),
-    net: balance(list, cur),
+    settle: settlements(balances(list, cur)),
     days: (trip.from && trip.to)
       ? Math.round((new Date(trip.to) - new Date(trip.from)) / 86400000) + 1 : 0,
   };
@@ -367,13 +431,12 @@ function renderRail() {
 function viewLedger() {
   const scope = activeTrip;
   const list = sorted(scopedExpenses());
-  const net = balance(list);
-  const settled = Math.abs(net) < 0.005;
-  const [A, B] = state.members;
-  const fronted = net > 0 ? A : B;   // 垫得多的那个
-  const owes    = net > 0 ? B : A;   // 要补钱的那个
+  const net = balances(list);
+  const moves = settlements(net);
+  const settled = moves.length === 0;
   const totals = personTotals(list);
   const trip = tripOf(scope);
+  const ms = liveMembers();
 
   const groups = [];
   for (const e of list) {
@@ -382,26 +445,39 @@ function viewLedger() {
     else groups.push({ date: e.date, items: [e] });
   }
 
-  const scopeLabel = scope === 'all' ? '全部' : scope === 'daily' ? '日常' : trip ? trip.name : '全部';
+  /* 余额卡的主视觉：一笔转账时是个大数字，多笔时是一张清单 */
+  const head = !list.length
+    ? `<div class="balance__label">${icon('scales')}<span>尚无账目</span></div>
+       <div class="balance__amount num">${fmt(0, state.display, { sym: false })}
+         <span class="cur">${state.display}</span></div>`
+    : settled
+    ? `<div class="balance__label">${icon('scales')}<span>账目已两清</span></div>
+       <div class="balance__amount num">${fmt(0, state.display, { sym: false })}
+         <span class="cur">${state.display}</span></div>`
+    : moves.length === 1
+    ? `<div class="balance__label">${icon('hand-coins')}
+         <span>${esc(memberName(moves[0].from))} 转给 ${esc(memberName(moves[0].to))}</span></div>
+       <div class="balance__amount num">${fmt(moves[0].amount, state.display, { sym: false })}
+         <span class="cur">${state.display}</span></div>
+       <p class="balance__sub">转账后两清</p>`
+    : `<div class="balance__label">${icon('hand-coins')}<span>${moves.length} 笔转账即可两清</span></div>
+       <div class="moves">
+         ${moves.map((m) => `
+           <div class="move">
+             ${avatar(m.from, 'sm')}
+             <span class="move__arrow">${icon('arrow-right')}</span>
+             ${avatar(m.to, 'sm')}
+             <span class="move__who">${esc(memberName(m.from))} → ${esc(memberName(m.to))}</span>
+             <span class="move__amt num">${fmt(m.amount, state.display)}</span>
+           </div>`).join('')}
+       </div>`;
 
   const side = `
     <div class="ledger-grid__side">
       <section class="balance ${settled ? 'balance--settled' : ''}">
-        <div class="balance__label">
-          ${icon(settled ? 'scales' : 'hand-coins')}
-          <span>${!list.length ? '尚无账目'
-            : settled ? '账目已两清'
-            : `${esc(owes.name)} 转给 ${esc(fronted.name)}`}</span>
-        </div>
-        <div class="balance__amount num">
-          ${fmt(settled ? 0 : Math.abs(net), state.display, { sym: false })}
-          <span class="cur">${state.display}</span>
-        </div>
-        ${settled || !list.length ? '' :
-          `<p class="balance__sub">转账后两清</p>`}
+        ${head}
         <div class="balance__split">
-          ${who('a', A, totals.a)}
-          ${who('b', B, totals.b)}
+          ${ms.map((m) => who(m, totals[m.id] || 0)).join('')}
         </div>
         ${settled ? '' : `
           <button class="btn btn--ghost btn--block" data-settle style="margin-top:16px">
@@ -449,7 +525,7 @@ function viewLedger() {
     </div>` : '';
 
   const emptyCopy = scope === 'all'
-    ? { h: '还没有记录', p: '两个人的开销都记进来，账才算得准。' }
+    ? { h: '还没有记录', p: '所有人的开销都记进来，账才算得准。' }
     : scope === 'daily'
     ? { h: '日常暂无记录', p: '未归入项目的开销会出现在这里。' }
     : { h: `${trip ? trip.name : '这个项目'}暂无记录`, p: '这次的开销单独算在这里。' };
@@ -471,11 +547,18 @@ function viewLedger() {
   return tripBar + tripHead + `<div class="ledger-grid">${side}<div>${body}</div></div>`;
 }
 
-const who = (slot, m, sum) => `
+/* 头像颜色按成员在列表里的位置定，见 styles.css 的 --member-N */
+const avatar = (id, size = '') => {
+  const i = Math.max(0, memberIndex(id)) % 8;
+  return `<span class="avatar avatar--m${i}${size ? ' avatar--' + size : ''}">${
+    esc(initial(memberName(id)))}</span>`;
+};
+
+const who = (m, sum) => `
   <div class="who">
-    <div class="avatar avatar--${slot}">${esc(initial(m.name))}</div>
+    ${avatar(m.id)}
     <div style="min-width:0">
-      <div class="who__name">${esc(m.name)} 花费</div>
+      <div class="who__name">${esc(m.name)}</div>
       <div class="who__sum num">${fmt(sum, state.display)}</div>
     </div>
   </div>`;
@@ -509,7 +592,7 @@ function rowHTML(e, i = 0) {
     ? `<i class="dot"></i><span class="row__trip">${icon('airplane-tilt')}${esc(t.name)}</span>` : '';
 
   if (e.type === 'settle') {
-    const to = memberName(e.payerId === 'a' ? 'b' : 'a');
+    const to = memberName(e.toId);
     return `
       <button ${delay} data-open="${e.id}">
         <div class="tile tile--accent">${icon('arrow-u-down-left')}</div>
@@ -522,9 +605,14 @@ function rowHTML(e, i = 0) {
   }
 
   const c = catOf(e.cat);
-  const splitTxt = e.split === 'even' ? 'AA' : e.split === 'other'
-    ? `${esc(memberName(e.payerId === 'a' ? 'b' : 'a'))} 全付`
-    : `${esc(payer)} 请客`;
+  const parts = e.participants || [];
+  const all = liveMembers().length;
+  const splitTxt =
+    parts.length === 0 ? '未分摊'
+    : parts.length === 1 && parts[0] === e.payerId ? `${esc(payer)} 自己`
+    : parts.length === 1 ? `记在 ${esc(memberName(parts[0]))}`
+    : parts.length >= all ? `${parts.length} 人均摊`
+    : `${parts.map((id) => esc(memberName(id))).join('、')} 均摊`;
   return `
     <button ${delay} data-open="${e.id}">
       <div class="tile">${icon(c.icon)}</div>
@@ -578,8 +666,7 @@ function viewStats() {
       <div class="balance__label">${icon('wallet')}<span>本月支出</span></div>
       <div class="balance__amount num">${fmt(total, state.display, { sym: false })}<span class="cur">${state.display}</span></div>
       <div class="balance__split">
-        ${who('a', state.members[0], totals.a)}
-        ${who('b', state.members[1], totals.b)}
+        ${liveMembers().map((m) => who(m, totals[m.id] || 0)).join('')}
       </div>
     </section>
 
@@ -632,13 +719,13 @@ function tripsSection() {
             <span class="cur">${state.display}</span></div>
           <div class="bar" style="width:${Math.max((s.total / max) * 100, 2)}%;animation-delay:${i * 70}ms"></div>
           <div class="tripcard__foot">
-            <span>${esc(state.members[0].name)} ${fmt(s.totals.a, state.display)}</span>
-            <span>${esc(state.members[1].name)} ${fmt(s.totals.b, state.display)}</span>
+            ${liveMembers().map((m) => `
+              <span>${esc(m.name)} ${fmt(s.totals[m.id] || 0, state.display)}</span>`).join('')}
           </div>
-          ${Math.abs(s.net) < 0.005 ? '' : `
-            <div class="tripcard__net">${
-              esc(s.net > 0 ? state.members[1].name : state.members[0].name)
-            } 转 ${fmt(Math.abs(s.net), state.display)} 即可结清</div>`}
+          ${!s.settle.length ? '' : `
+            <div class="tripcard__net">${s.settle.length === 1
+              ? `${esc(memberName(s.settle[0].from))} 转 ${fmt(s.settle[0].amount, state.display)} 即可结清`
+              : `${s.settle.length} 笔转账即可结清`}</div>`}
         </button>`).join('')}
     </div>`;
 }
@@ -649,12 +736,20 @@ function viewSettings() {
     <div class="sec"><h2>设置</h2></div>
 
     <div class="card">
-      ${state.members.map((m, i) => `
+      ${liveMembers().map((m, i) => `
         <div class="listrow">
-          <div class="avatar avatar--${i === 0 ? 'a' : 'b'} avatar--sm">${esc(initial(m.name))}</div>
+          ${avatar(m.id, 'sm')}
           <input class="nameinput" data-name="${m.id}" value="${esc(m.name)}"
                  maxlength="12" aria-label="成员 ${i + 1} 的名字">
+          ${liveMembers().length > 2
+            ? `<button class="iconbtn" data-rm-member="${m.id}" aria-label="移除 ${esc(m.name)}">${icon('x')}</button>`
+            : ''}
         </div>`).join('')}
+      ${liveMembers().length < MAX_MEMBERS ? `
+        <button class="listrow" data-add-member>
+          ${icon('user-plus')}
+          <span class="listrow__label">加一个人</span>
+        </button>` : ''}
     </div>
 
     ${lookPanel()}
@@ -961,7 +1056,7 @@ function openOnboarding() {
     dismissible: false,
     body: `
       <p style="font-size:14px;color:var(--ink-2);line-height:1.65">
-        填上两个名字，之后随时能改。
+        填上两个名字。之后在设置里可以改，也可以再加人。
       </p>
 
       <div class="namepair">
@@ -1020,7 +1115,12 @@ function openOnboarding() {
           err.hidden = false; return;
         }
         state.members = [{ id: 'a', name: a }, { id: 'b', name: b }];
-        if (withDemo) { state.trips = seedTrips(); state.expenses = seed(); }
+        if (withDemo) {
+          state.trips = seedTrips();
+          state.expenses = seed();
+          const ids = state.members.map((x) => x.id);
+          state.expenses.forEach((e) => migrateSplit(e, ids));   // 兜底
+        }
         state.onboarded = true;
         animateRows = true;
         save(); closeSheetNow(); render();
@@ -1085,6 +1185,39 @@ function wireView() {
     el.onclick = () => openTrip(tripOf(el.dataset.editTrip)));
   document.querySelectorAll('[data-open-trip]').forEach((el) =>
     el.onclick = () => { activeTrip = el.dataset.openTrip; animateRows = true; go('ledger'); });
+
+  document.querySelectorAll('[data-add-member]').forEach((el) => el.onclick = () => {
+    const used = new Set(state.members.map((m) => m.id));
+    let id = 'a';
+    for (let i = 0; i < 26 && used.has(id); i++) id = String.fromCharCode(97 + i + 1);
+    if (used.has(id)) id = uid();
+    const taken = new Set(liveMembers().map((m) => m.name));
+    const name = NAME_POOL.find((n) => !taken.has(n)) || '新成员';
+    state.members.push({ id, name });
+    touchMeta(); save(); render(); queueSync();
+    // 直接聚焦新名字，方便立刻改
+    const input = document.querySelector(`[data-name="${id}"]`);
+    if (input) { input.focus(); input.select(); }
+  });
+
+  document.querySelectorAll('[data-rm-member]').forEach((el) => el.onclick = () => {
+    const id = el.dataset.rmMember;
+    const m = state.members.find((x) => x.id === id);
+    const n = liveExpenses().filter((e) =>
+      e.payerId === id || e.toId === id || (e.participants || []).includes(id)).length;
+    confirmSheet({
+      title: `移除 ${m.name}`,
+      body: n
+        ? `${m.name} 参与了 ${n} 笔记录，这些记录会保留，名字也还看得到，只是之后记新账时不再出现。`
+        : `${m.name} 还没有任何记录，移除后不影响账目。`,
+      danger: '移除',
+      onOk: () => {
+        m.removed = true;
+        touchMeta(); save(); render(); queueSync();
+        toast(`已移除 ${m.name}`, 'check');
+      },
+    });
+  });
 
   const settle = $('[data-settle]');
   if (settle) settle.onclick = openSettle;
@@ -1173,47 +1306,76 @@ function confirmSheet({ title, body, danger, onOk }) {
    ========================================================================== */
 function openSettle() {
   const scoped = scopedExpenses();
-  const net = balance(scoped);
-  const from = net > 0 ? state.members[1] : state.members[0];
-  const to   = net > 0 ? state.members[0] : state.members[1];
-  const amt  = Math.abs(net);
+  const moves = settlements(balances(scoped));
   const trip = tripOf(activeTrip);
+  if (!moves.length) { toast('已经两清了', 'check'); return; }
+
+  let pick = 0;                                   // 选中第几笔建议
+  const cur0 = state.display;
+
+  const row = (m, i) => `
+    <button type="button" class="movepick" data-move="${i}" aria-pressed="${i === 0}">
+      ${avatar(m.from, 'sm')}
+      <span class="move__arrow">${icon('arrow-right')}</span>
+      ${avatar(m.to, 'sm')}
+      <span class="movepick__who">${esc(memberName(m.from))} → ${esc(memberName(m.to))}</span>
+      <span class="movepick__amt num">${fmt(m.amount, cur0)}</span>
+    </button>`;
 
   openSheet({
     title: '结算',
     body: `
       <div class="alert">${icon('scales')}
         <span>记下这次转账，差额即抵销。不计为消费${
-          trip ? '，仅结算「' + esc(trip.name) + '」这个项目' : ''}。</span></div>
+          trip ? '，只结算「' + esc(trip.name) + '」' : ''}。</span></div>
+
+      ${moves.length > 1 ? `
+        <div class="field" style="margin-top:18px">
+          <span class="label">这次结哪一笔</span>
+          <div class="movelist">${moves.map(row).join('')}</div>
+        </div>` : ''}
+
       <div class="field" style="margin-top:18px">
-        <label class="label" for="st-amt">${esc(from.name)} 付给 ${esc(to.name)}</label>
+        <label class="label" for="st-amt" id="st-label">
+          ${esc(memberName(moves[0].from))} 转给 ${esc(memberName(moves[0].to))}
+        </label>
         <div class="amountbox">
           <input id="st-amt" class="num" type="text" inputmode="decimal"
-                 value="${amt.toFixed(CURRENCIES[state.display].dec)}">
+                 value="${moves[0].amount.toFixed(CURRENCIES[cur0].dec)}">
           <select id="st-cur">${DISPLAY.map((c) =>
-            `<option value="${c}" ${c === state.display ? 'selected' : ''}>${c}</option>`).join('')}</select>
+            `<option value="${c}" ${c === cur0 ? 'selected' : ''}>${c}</option>`).join('')}</select>
         </div>
       </div>`,
     foot: `<button class="btn btn--ghost" data-close>取消</button>
            <button class="btn btn--primary" data-ok>${icon('check')}确认</button>`,
     onMount: (host) => {
-      host.querySelector('[data-ok]').onclick = () => {
-        const v = parseFloat(host.querySelector('#st-amt').value);
+      const q = (sel) => host.querySelector(sel);
+
+      host.querySelectorAll('[data-move]').forEach((b) => b.onclick = () => {
+        pick = Number(b.dataset.move);
+        host.querySelectorAll('[data-move]').forEach((x) =>
+          x.setAttribute('aria-pressed', String(x === b)));
+        const m = moves[pick];
+        q('#st-label').textContent = `${memberName(m.from)} 转给 ${memberName(m.to)}`;
+        q('#st-amt').value = m.amount.toFixed(CURRENCIES[q('#st-cur').value].dec);
+      });
+
+      q('[data-ok]').onclick = () => {
+        const v = parseFloat(q('#st-amt').value);
         if (!(v > 0)) { toast('金额需大于 0', 'warning-circle'); return; }
-        state.expenses.push({
-          id: uid(), type: 'settle', payerId: from.id, amount: v,
-          currency: host.querySelector('#st-cur').value,
-          cat: 'other', merchant: '', note: '', date: todayISO(),
-          split: 'payer', tripId: trip ? trip.id : null, createdAt: Date.now(),
-          updatedAt: new Date().toISOString(), dirty: true,
-        });
+        const m = moves[pick];
+        state.expenses.push(touch({
+          id: uid(), type: 'settle', payerId: m.from, toId: m.to, amount: v,
+          currency: q('#st-cur').value, cat: 'other', merchant: '', note: '',
+          date: todayISO(), participants: [], tripId: trip ? trip.id : null,
+          createdAt: Date.now(),
+        }));
         save(); closeSheetNow(); render(); queueSync();
         toast('已结算', 'check');
       };
     },
   });
 }
-
 
 /* ==========================================================================
    项目：新建 / 编辑
@@ -1320,9 +1482,10 @@ function openAdd(existing) {
   const guessed = guessTrip(todayISO());
   const guessedTrip = tripOf(guessed);
   const draft = editing ? { tripId: null, ...existing } : {
-    id: uid(), type: 'expense', payerId: 'a', amount: '',
+    id: uid(), type: 'expense', payerId: liveMembers()[0].id, amount: '',
     currency: (guessedTrip && guessedTrip.currency) || state.display,
-    cat: '', merchant: '', note: '', date: todayISO(), split: 'even',
+    cat: '', merchant: '', note: '', date: todayISO(),
+    participants: liveMembers().map((m) => m.id),
     tripId: guessed, createdAt: Date.now(),
   };
 
@@ -1380,25 +1543,31 @@ function openAdd(existing) {
         </div>
 
         <div class="field">
-          <span class="label">付款人</span>
-          <div class="pick" id="f-payer">
-            ${state.members.map((m, i) => `
+          <span class="label">谁付的</span>
+          <div class="pick pick--wrap" id="f-payer">
+            ${liveMembers().map((m) => `
               <button type="button" class="pickbtn" data-payer="${m.id}"
                       aria-pressed="${draft.payerId === m.id}">
-                <span class="avatar avatar--${i === 0 ? 'a' : 'b'} avatar--sm">${esc(initial(m.name))}</span>
-                ${esc(m.name)}
+                ${avatar(m.id, 'sm')}${esc(m.name)}
               </button>`).join('')}
           </div>
         </div>
 
         <div class="field">
-          <span class="label">分摊方式</span>
-          <div class="pick pick--3" id="f-split">
-            <button type="button" class="pickbtn" data-split="even"  aria-pressed="${draft.split === 'even'}">AA 平分</button>
-            <button type="button" class="pickbtn" data-split="payer" aria-pressed="${draft.split === 'payer'}">请客</button>
-            <button type="button" class="pickbtn" data-split="other" aria-pressed="${draft.split === 'other'}">对方全付</button>
+          <div style="display:flex;align-items:baseline;gap:10px">
+            <span class="label" style="margin-right:auto">谁分摊</span>
+            <button type="button" class="linkbtn" id="f-all">全选</button>
+            <button type="button" class="linkbtn" id="f-only">只有付款人</button>
+          </div>
+          <div class="pick pick--wrap" id="f-parts">
+            ${liveMembers().map((m) => `
+              <button type="button" class="pickbtn" data-part="${m.id}"
+                      aria-pressed="${(draft.participants || []).includes(m.id)}">
+                ${avatar(m.id, 'sm')}${esc(m.name)}
+              </button>`).join('')}
           </div>
           <p class="hint" id="f-split-hint"></p>
+          <p class="err" id="f-part-err" hidden>至少选一个分摊人</p>
         </div>
 
         <div class="field">
@@ -1448,12 +1617,15 @@ function wireAddForm(host, draft, editing) {
         .join('');
   };
   const syncSplitHint = () => {
+    const parts = draft.participants || [];
     const payer = memberName(draft.payerId);
-    const other = memberName(draft.payerId === 'a' ? 'b' : 'a');
+    const n = parts.length;
     q('#f-split-hint').textContent =
-      draft.split === 'even'  ? `${other} 补一半给 ${payer}。` :
-      draft.split === 'payer' ? `${payer} 请客，不用补。` :
-                                `${other} 补全额给 ${payer}。`;
+      n === 0 ? '' :
+      n === 1 && parts[0] === draft.payerId ? `${payer} 自己承担，不用别人补。` :
+      n === 1 ? `全额记在 ${memberName(parts[0])} 头上。` :
+      `${payer} 垫付，${n} 个人各摊一份。`;
+    q('#f-part-err').hidden = n > 0;
   };
 
   const tripSel = q('#f-trip');
@@ -1491,7 +1663,25 @@ function wireAddForm(host, draft, editing) {
     });
   pickGroup('#f-cats', 'cat', 'cat', () => q('#f-cat-err').hidden = true);
   pickGroup('#f-payer', 'payer', 'payerId', syncSplitHint);
-  pickGroup('#f-split', 'split', 'split', syncSplitHint);
+
+  /* 分摊人是多选，不能复用单选的 pickGroup */
+  const paintParts = () => host.querySelectorAll('#f-parts [data-part]').forEach((b) =>
+    b.setAttribute('aria-pressed', String((draft.participants || []).includes(b.dataset.part))));
+  host.querySelectorAll('#f-parts [data-part]').forEach((b) => b.onclick = () => {
+    const id = b.dataset.part;
+    const set = new Set(draft.participants || []);
+    set.has(id) ? set.delete(id) : set.add(id);
+    draft.participants = liveMembers().map((m) => m.id).filter((x) => set.has(x));
+    paintParts(); syncSplitHint();
+  });
+  q('#f-all').onclick = () => {
+    draft.participants = liveMembers().map((m) => m.id);
+    paintParts(); syncSplitHint();
+  };
+  q('#f-only').onclick = () => {
+    draft.participants = [draft.payerId];
+    paintParts(); syncSplitHint();
+  };
 
   /* --- 拍照识别 --- */
   const dz = q('#dz'), file = q('#file');
@@ -1519,6 +1709,9 @@ function wireAddForm(host, draft, editing) {
     if (!(v > 0)) bad = true;
     q('#f-cat-err').hidden = !!draft.cat;
     if (!draft.cat) bad = true;
+    const nParts = (draft.participants || []).length;
+    q('#f-part-err').hidden = nParts > 0;
+    if (!nParts) bad = true;
     if (bad) { q('#f-amt').focus(); return; }
 
     const rec = {
@@ -1556,7 +1749,7 @@ function wireAddForm(host, draft, editing) {
 }
 
 function openSettleDetail(e) {
-  const from = memberName(e.payerId), to = memberName(e.payerId === 'a' ? 'b' : 'a');
+  const from = memberName(e.payerId), to = memberName(e.toId);
   confirmSheet({
     title: '结算记录',
     body: `${e.date}，${from} 转给 ${to} ${fmt(e.amount, e.currency)}。删除后差额将恢复。`,
@@ -1683,6 +1876,8 @@ let syncStatus = 'off';               // off | idle | busy | error | offline
 let syncError = '';
 let syncTimer = null;
 let pollTimer = null;
+let schemaOutdated = false;      // 数据库还是两人结构
+let schemaWarned = false;
 
 function loadSync() {
   try {
@@ -1758,7 +1953,12 @@ async function syncNow({ manual = false } = {}) {
     syncStatus = 'idle'; paintSync();
 
     if (changed || manual) render();
-    if (manual) toast(changed ? '同步完成' : '已是最新', 'check');
+    if (schemaOutdated && !schemaWarned) {
+      schemaWarned = true;
+      toast('数据库还是两人版，请重跑一次 schema.sql', 'warning-circle');
+    } else if (manual) {
+      toast(changed ? '同步完成' : '已是最新', 'check');
+    }
   } catch (err) {
     const offline = !navigator.onLine || err.message === 'Failed to fetch';
     syncStatus = offline ? 'offline' : 'error';
@@ -1788,12 +1988,33 @@ function mergePull(out) {
     }
   };
 
-  mergeList(out.entries, state.expenses, (e) => ({
-    id: e.id, type: e.type, payerId: e.payerId, amount: Number(e.amount),
-    currency: e.currency, cat: e.cat || '', merchant: e.merchant || '',
-    note: e.note || '', date: e.date, split: e.split, tripId: e.tripId || null,
-    deleted: !!e.deleted, createdAt: Number(e.createdAt) || 0, updatedAt: e.updatedAt,
-  }));
+  /* 数据库还没升级到多人结构时，pull 回来的是老的 split 字段。
+     就地按老规则还原成 participants，界面不至于崩，同时提示去升级。 */
+  let legacyRows = 0;
+  const ids = state.members.map((m) => m.id);
+
+  mergeList(out.entries, state.expenses, (e) => {
+    let parts = Array.isArray(e.participants) ? e.participants : null;
+    if (!parts) {
+      legacyRows++;
+      const others = ids.filter((id) => id !== e.payerId);
+      parts = e.type === 'settle' ? []
+            : e.split === 'payer' ? [e.payerId]
+            : e.split === 'other' ? others
+            : ids.slice();
+    }
+    return {
+      id: e.id, type: e.type, payerId: e.payerId, amount: Number(e.amount),
+      currency: e.currency, cat: e.cat || '', merchant: e.merchant || '',
+      note: e.note || '', date: e.date,
+      participants: parts,
+      toId: e.toId || (e.type === 'settle' ? ids.find((x) => x !== e.payerId) || null : null),
+      tripId: e.tripId || null,
+      deleted: !!e.deleted, createdAt: Number(e.createdAt) || 0, updatedAt: e.updatedAt,
+    };
+  });
+
+  if (legacyRows) schemaOutdated = true;
 
   mergeList(out.trips, state.trips, (t) => ({
     id: t.id, name: t.name, from: t.from || '', to: t.to || '',
@@ -1888,6 +2109,30 @@ function startSyncLoop() {
 }
 
 /* ==========================================================================
+   离线
+   ========================================================================== */
+function registerSW() {
+  if (!('serviceWorker' in navigator)) return;
+  // file:// 下没有 service worker，本地直接打开 index.html 时跳过
+  if (location.protocol === 'file:') return;
+
+  navigator.serviceWorker.register(new URL('./sw.js', import.meta.url))
+    .then((reg) => {
+      reg.addEventListener('updatefound', () => {
+        const sw = reg.installing;
+        if (!sw) return;
+        sw.addEventListener('statechange', () => {
+          // 已经有旧版在跑，说明这是一次更新而不是首次安装
+          if (sw.state === 'installed' && navigator.serviceWorker.controller) {
+            toast('新版本已就绪，重开生效', 'arrows-clockwise');
+          }
+        });
+      });
+    })
+    .catch((e) => console.warn('[sw] 注册失败:', e.message));
+}
+
+/* ==========================================================================
    启动
    ========================================================================== */
 async function boot() {
@@ -1900,5 +2145,6 @@ async function boot() {
   render();
   if (isSynced()) { startSyncLoop(); syncNow(); }
   if (!state.onboarded) openOnboarding();
+  registerSW();
 }
 boot();
