@@ -175,7 +175,7 @@ export default {
     out.amount = Number.isFinite(n) ? Math.round(n * 100) / 100 : 0;
     out.currency = String(out.currency || '').toUpperCase().slice(0, 3);
     const valid = new Set(categories.map((c) => c.id));
-    if (!valid.has(out.category)) out.category = 'other';
+    if (!valid.has(out.category)) out.category = categories[0] ? categories[0].id : 'food';
     if (out.confidence !== 'high' && out.confidence !== 'low') out.confidence = 'low';
 
     return json(out, 200, cors);

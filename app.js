@@ -102,16 +102,18 @@ function fmt(amount, cur, { sym = true } = {}) {
    分类
    ========================================================================== */
 const CATS = [
-  { id: 'food',    label: '吃饭', icon: 'fork-knife' },
+  { id: 'food',    label: '餐饮', icon: 'fork-knife' },
   { id: 'transit', label: '交通', icon: 'car' },
   { id: 'stay',    label: '住宿', icon: 'bed' },
   { id: 'shop',    label: '购物', icon: 'shopping-bag' },
-  { id: 'fun',     label: '娱乐', icon: 'confetti' },
-  { id: 'daily',   label: '日用', icon: 'basket' },
-  { id: 'health',  label: '医疗', icon: 'first-aid-kit' },
-  { id: 'other',   label: '其他', icon: 'dots-three-outline' },
+  { id: 'ticket',  label: '门票', icon: 'ticket' },
 ];
-const catOf = (id) => CATS.find((c) => c.id === id) || CATS[CATS.length - 1];
+
+/* 旧账里的分类映射到新的五类。娱乐多半是门票，日用和医疗都归购物。 */
+const CAT_ALIAS = { fun: 'ticket', daily: 'shop', health: 'shop', other: 'shop' };
+const normCat = (id) => CAT_ALIAS[id] || id;
+
+const catOf = (id) => CATS.find((c) => c.id === normCat(id)) || CATS[0];
 
 /* ==========================================================================
    状态
@@ -142,8 +144,8 @@ function seed() {
     { id: uid(), type: 'expense', payerId: 'b', amount: 128,  currency: 'HKD', cat: 'transit', merchant: '的士 尖沙咀→中環', note: '',       date: d(0), participants: ALL(), tripId: null, createdAt: Date.now() - 2e5 },
     { id: uid(), type: 'expense', payerId: 'b', amount: 32.4, currency: 'GBP', cat: 'shop',    merchant: 'Boots',        note: '防曬同藥',   date: d(1), participants: ALL(), tripId: null, createdAt: Date.now() - 9e6 },
     { id: uid(), type: 'expense', payerId: 'a', amount: 1240, currency: 'CNY', cat: 'stay',    merchant: '深圳灣民宿',     note: '兩晚',      date: d(2), participants: ALL(), tripId: 't-sz', createdAt: Date.now() - 2e7 },
-    { id: uid(), type: 'expense', payerId: 'a', amount: 268,  currency: 'HKD', cat: 'fun',     merchant: 'Broadway 戲院',  note: '',         date: d(3), participants: ALL(), tripId: null, createdAt: Date.now() - 3e7 },
-    { id: uid(), type: 'expense', payerId: 'b', amount: 74.5, currency: 'HKD', cat: 'daily',   merchant: '惠康超市',       note: '',         date: d(4), participants: ALL(), tripId: null, createdAt: Date.now() - 4e7 },
+    { id: uid(), type: 'expense', payerId: 'a', amount: 268,  currency: 'HKD', cat: 'ticket',  merchant: 'Broadway 戲院',  note: '',         date: d(3), participants: ALL(), tripId: null, createdAt: Date.now() - 3e7 },
+    { id: uid(), type: 'expense', payerId: 'b', amount: 74.5, currency: 'HKD', cat: 'shop',    merchant: '惠康超市',       note: '',         date: d(4), participants: ALL(), tripId: null, createdAt: Date.now() - 4e7 },
     { id: uid(), type: 'expense', payerId: 'a', amount: 9800, currency: 'JPY', cat: 'food',    merchant: '鮨 銀座おのでら', note: '生日飯',   date: d(6), participants: ONLY(ids[1]), tripId: 't-tokyo', createdAt: Date.now() - 6e7 },
   ];
 }
@@ -188,7 +190,7 @@ function load() {
     // 已经有存档的人不该再被引导一次
     const st = { ...structuredClone(DEFAULT_STATE), onboarded: true, ...s };
     const ids = st.members.map((m) => m.id);
-    st.expenses.forEach((e) => migrateSplit(e, ids));
+    st.expenses.forEach((e) => { migrateSplit(e, ids); e.cat = normCat(e.cat); });
     return st;
   } catch {
     return structuredClone(DEFAULT_STATE);
@@ -480,6 +482,10 @@ function viewLedger() {
       <section class="balance ${settled ? 'balance--settled' : ''}">
         ${head}
         <div class="balance__split">
+          <div class="who who--head">
+            <span class="who__name">谁</span>
+            <span class="who__sum">该摊 ${state.display}</span>
+          </div>
           ${ms.map((m) => who(m, totals[m.id] || 0)).join('')}
         </div>
         ${settled ? '' : `
@@ -557,13 +563,12 @@ const avatar = (id, size = '') => {
     esc(initial(memberName(id)))}</span>`;
 };
 
+/* sum 是这个人「该摊多少」，不是他付了多少。没有标签的话一个裸数字看不懂。 */
 const who = (m, sum) => `
   <div class="who">
-    ${avatar(m.id)}
-    <div style="min-width:0">
-      <div class="who__name">${esc(m.name)}</div>
-      <div class="who__sum num">${fmt(sum, state.display)}</div>
-    </div>
+    ${avatar(m.id, 'sm')}
+    <span class="who__name">${esc(m.name)}</span>
+    <span class="who__sum num">${fmt(sum, state.display, { sym: false })}</span>
   </div>`;
 
 function dayGroup(g) {
@@ -669,6 +674,10 @@ function viewStats() {
       <div class="balance__label">${icon('wallet')}<span>本月支出</span></div>
       <div class="balance__amount num">${fmt(total, state.display, { sym: false })}<span class="cur">${state.display}</span></div>
       <div class="balance__split">
+        <div class="who who--head">
+          <span class="who__name">谁</span>
+          <span class="who__sum">该摊 ${state.display}</span>
+        </div>
         ${liveMembers().map((m) => who(m, totals[m.id] || 0)).join('')}
       </div>
     </section>
@@ -1084,8 +1093,8 @@ async function copyCode(code) {
 const PALETTES = [
   { id: 'cobalt', label: '钴蓝', swatch: ['#2F53D6', '#EEF0ED', '#14171A'], themeColor: { light: '#EEF0ED', dark: '#0D0F11' } },
   { id: 'celadon', label: '青瓷', swatch: ['#2E7D6A', '#EDF1EE', '#131A17'], themeColor: { light: '#EDF1EE', dark: '#0B100E' } },
-  { id: 'ink', label: '墨', swatch: ['#171614', '#EFEEEB', '#8A7355'], themeColor: { light: '#EFEEEB', dark: '#0E0E0D' } },
-  { id: 'clay', label: '赤陶', swatch: ['#A9503A', '#F1EDE9', '#1B1714'], themeColor: { light: '#F1EDE9', dark: '#110E0C' } }
+  { id: 'indigo', label: '黛紫', swatch: ['#5B52A3', '#EFEEF3', '#17161F'], themeColor: { light: '#EFEEF3', dark: '#0E0D13' } },
+  { id: 'mist', label: '雾灰', swatch: ['#4A6070', '#EEEFF0', '#15181B'], themeColor: { light: '#EEEFF0', dark: '#0D0F10' } }
 ];
 const MODES = [
   { id: 'auto',  label: '跟随系统' },
@@ -1376,6 +1385,19 @@ function toast(msg, ic = 'check') {
    Sheet 基础设施
    ========================================================================== */
 let closeSheet = null;
+let lockedAt = 0;
+
+/* iOS 上 overflow:hidden 拦不住背景滚动，得把 body 定住再还原位置 */
+function lockScroll() {
+  lockedAt = window.scrollY || 0;
+  document.body.style.top = `-${lockedAt}px`;
+  document.body.classList.add('is-locked');
+}
+function unlockScroll() {
+  document.body.classList.remove('is-locked');
+  document.body.style.top = '';
+  window.scrollTo(0, lockedAt);
+}
 
 function openSheet({ title, body, foot, onMount, dismissible = true }) {
   closeSheetNow();
@@ -1390,7 +1412,7 @@ function openSheet({ title, body, foot, onMount, dismissible = true }) {
       <div class="sheet__body">${body}</div>
       ${foot ? `<div class="sheet__foot">${foot}</div>` : ''}
     </div>`;
-  document.body.style.overflow = 'hidden';
+  lockScroll();
   host.querySelectorAll('[data-close]').forEach((el) => el.onclick = closeSheetNow);
 
   const onKey = (ev) => { if (ev.key === 'Escape' && dismissible) closeSheetNow(); };
@@ -1398,7 +1420,7 @@ function openSheet({ title, body, foot, onMount, dismissible = true }) {
   closeSheet = () => {
     document.removeEventListener('keydown', onKey);
     host.innerHTML = '';
-    document.body.style.overflow = '';
+    unlockScroll();
     closeSheet = null;
   };
   onMount?.(host);
@@ -1483,7 +1505,7 @@ function openSettle() {
         const m = moves[pick];
         state.expenses.push(touch({
           id: uid(), type: 'settle', payerId: m.from, toId: m.to, amount: v,
-          currency: q('#st-cur').value, cat: 'other', merchant: '', note: '',
+          currency: q('#st-cur').value, cat: 'shop', merchant: '', note: '',
           date: todayISO(), participants: [], tripId: trip ? trip.id : null,
           createdAt: Date.now(),
         }));
@@ -2122,7 +2144,7 @@ function mergePull(out) {
     }
     return {
       id: e.id, type: e.type, payerId: e.payerId, amount: Number(e.amount),
-      currency: e.currency, cat: e.cat || '', merchant: e.merchant || '',
+      currency: e.currency, cat: normCat(e.cat) || '', merchant: e.merchant || '',
       note: e.note || '', date: e.date,
       participants: parts,
       toId: e.toId || (e.type === 'settle' ? ids.find((x) => x !== e.payerId) || null : null),

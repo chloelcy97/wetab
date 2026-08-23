@@ -163,7 +163,7 @@ def scan_receipt(data_url, categories):
     out["currency"] = str(out.get("currency") or "").upper()[:3]
     valid = {c["id"] for c in categories}
     if out.get("category") not in valid:
-        out["category"] = "other"
+        out["category"] = categories[0]["id"] if categories else "food"
     if out.get("confidence") not in ("high", "low"):
         out["confidence"] = "low"
     return out
