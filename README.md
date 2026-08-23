@@ -3,7 +3,7 @@
 几个人一起记账。多币种自动按实时汇率换算成港币 / 英镑 / 人民币，按分类拆开看，
 拍一张小票就能自动填好整笔账。没网也能开、也能记。
 
-标记是一个等号——两条等长的横杠，既是「两清」也是「平分」，正好是这个应用在做的唯一一件事。
+标记是一个斜等号：等号斜过来的两道平行线。既是「两清」也是「平分」，正好是这个应用在做的唯一一件事。
 
 零构建：不需要 Node、不需要 npm、不需要 `pip install`。只要有 Python 3.8+。
 
@@ -66,9 +66,8 @@ export TALLY_MODEL=claude-sonnet-5
 **成员（2 到 8 人）**
 - 设置里随时加人、改名、移除
 - 移除是软删除：历史记录里的名字还认得出，只是记新账时不再出现
-- 头像是几何标记（斜线 / 圆环 / 双斜线 / 十字…），和等号 logo 同一套笔触
+- 头像是名字的首字母
 - 头像色从强调色附近取，色相摆幅 ±65°、饱和度压到 0.34 以内，八个人是一个家族而不是彩虹
-- 认人主要靠标记，颜色只是辅助，所以颜色可以收着来
 
 **记账**
 - 手动填，或者拍/选一张小票照片自动识别金额、币种、商家、日期、分类
@@ -149,7 +148,7 @@ config.js                     Supabase 连接、小票识别端点、汇率地�
 sprite.svg                    Phosphor 图标合成的 sprite（由 icons/ 重建，不要手改）
 icons/                        原始 Phosphor SVG
 manifest.webmanifest          PWA 配置
-icon-*.png                    主屏图标（等号标记）
+icon-*.png                    主屏图标（斜等号标记）
 sw.js                         Service worker：离线缓存
 server.py                     本地开发服务：静态文件 + /api/scan（线上不需要它）
 worker/receipt-scan.js        线上的小票识别代理，粘进 Cloudflare Worker 网页编辑器
@@ -157,7 +156,7 @@ worker/receipt-scan.js        线上的小票识别代理，粘进 Cloudflare Wo
 supabase/schema.sql           建表 + RLS + 三个 RPC 函数，粘进 Supabase SQL Editor 跑
 ```
 
-品牌标记（等号）内联在 `app.js` 的 `brand()` 里，不在 sprite 中，所以重建 sprite 不会动到它。
+品牌标记（斜等号）内联在 `app.js` 的 `brand()` 里，不在 sprite 中，所以重建 sprite 不会动到它。
 要加 Phosphor 图标的话，把 SVG 丢进 `icons/`，然后：
 
 ```bash

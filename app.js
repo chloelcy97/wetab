@@ -13,12 +13,16 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
 const icon = (name, cls = 'icon') =>
   `<svg class="${cls}" aria-hidden="true"><use href="#ph-${name}"></use></svg>`;
 
-/* 品牌标记：等号。两条等长横杠 = 两清 / 平分。
+/* 品牌标记：斜等号。等号斜过来的两道平行线 —— 还是两清 / 平分，只是多一点走势。
+   fill="none" 写在 path 上而不是 svg 上：.icon 的 fill: currentColor 会盖过
+   svg 上的同名属性，但盖不过 path 自己的。
    不放进 sprite，因为 sprite 是从 icons/ 里的 Phosphor 原文件重建的。 */
 const brand = (cls = 'icon') =>
   `<svg class="${cls}" viewBox="0 0 256 256" aria-hidden="true">
-     <rect x="62" y="85" width="132" height="30" rx="15"/>
-     <rect x="62" y="141" width="132" height="30" rx="15"/>
+     <path d="M69 190 117 66" fill="none" stroke="currentColor"
+           stroke-width="29" stroke-linecap="round"/>
+     <path d="M139 190 187 66" fill="none" stroke="currentColor"
+           stroke-width="29" stroke-linecap="round"/>
    </svg>`;
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -556,28 +560,14 @@ function viewLedger() {
 }
 
 /* 头像颜色按成员在列表里的位置定，见 styles.css 的 --member-N */
-/* 八个几何标记，和等号 logo 同一套笔触：直线、圆头线帽、不填色。
-   顺序按辨识度排——最常用的头两个是斜线和圆环，一眼分得开，
-   相似的（反斜线、双斜线、叉）排到后面。 */
-const MARKS = [
-  '<path d="M8 16 L16 8"/>',                                  // 斜线
-  '<circle cx="12" cy="12" r="4"/>',                          // 圆环
-  '<path d="M7 15.5 L12 10.5"/><path d="M12 15.5 L17 10.5"/>',// 双斜线
-  '<path d="M12 7.5 V16.5"/><path d="M7.5 12 H16.5"/>',       // 十字
-  '<path d="M8 8 L16 16"/>',                                  // 反斜线
-  '<path d="M7 12 H17"/>',                                    // 横杠
-  '<path d="M8 8 L16 16"/><path d="M16 8 L8 16"/>',           // 叉
-  '<path d="M12 7 V17"/>',                                    // 竖线
-];
+const initial = (name) => (name || '?').trim().slice(0, 1).toUpperCase();
 
 const avatar = (id, size = '') => {
   const i = Math.max(0, memberIndex(id)) % 8;
-  return `<span class="avatar avatar--m${i}${size ? ' avatar--' + size : ''}"
-    title="${esc(memberName(id))}"><svg viewBox="0 0 24 24" aria-hidden="true"
-    fill="none" stroke="currentColor" stroke-linecap="round">${MARKS[i]}</svg></span>`;
+  return `<span class="avatar avatar--m${i}${size ? ' avatar--' + size : ''}">${
+    esc(initial(memberName(id)))}</span>`;
 };
 
-/* sum 是这个人「该摊多少」，不是他付了多少。没有标签的话一个裸数字看不懂。 */
 const who = (m, sum) => `
   <div class="who">
     ${avatar(m.id, 'sm')}
