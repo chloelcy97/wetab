@@ -1,0 +1,9 @@
+{
+  "name": "tally",
+  "version": "1.0.0",
+  "description": "WeTab 账本读写。所有数据库访问都收在这一个云函数里。",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "~2.6.3"
+  }
+}
