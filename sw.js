@@ -25,6 +25,7 @@ const SHELL = [
   './config.js',
   './sprite.svg',
   './manifest.webmanifest',
+  './favicon.svg',
   './icon-192.png',
   './icon-512.png',
   './icon-maskable.png',

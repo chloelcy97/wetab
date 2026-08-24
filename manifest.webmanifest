@@ -1,7 +1,7 @@
 {
-  "name": "WeTab · 双人账本",
+  "name": "WeTab · 一起记账",
   "short_name": "WeTab",
-  "description": "两个人一起记账：多币种自动换算、消费分类、拍照识别小票。",
+  "description": "几个人一起记账：多币种按实时汇率换算、消费分类、拍照识别小票，随时看清谁该转给谁多少。",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

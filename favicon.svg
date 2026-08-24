@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <!-- WeTab 斜等号。几何和 icon-*.png 一致：标记缩到 63% 居中，四周留 18.5% 白。 -->
+  <rect width="256" height="256" rx="56" fill="#2F53D6"/>
+  <g transform="translate(47.36 47.36) scale(0.63)"
+     fill="none" stroke="#fff" stroke-width="29" stroke-linecap="round">
+    <path d="M69 190 117 66"/>
+    <path d="M139 190 187 66"/>
+  </g>
+</svg>
