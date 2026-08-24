@@ -924,6 +924,10 @@ function viewSettings() {
         <span class="listrow__label">导出账本</span>
         <span class="listrow__value">${liveExpenses().length} 笔</span>
       </button>
+      <button class="listrow" data-import>
+        ${icon('arrows-clockwise')}
+        <span class="listrow__label">导入账本</span>
+      </button>
       <button class="listrow" data-clear>
         ${icon('trash')}
         <span class="listrow__label">清空账本</span>
@@ -1360,6 +1364,45 @@ function wireView() {
     a.download = `wetab-${todayISO()}.json`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+
+  const imp = $('[data-import]');
+  if (imp) imp.onclick = () => {
+    const f = document.createElement('input');
+    f.type = 'file';
+    f.accept = 'application/json,.json';
+    f.onchange = async () => {
+      const file = f.files && f.files[0];
+      if (!file) return;
+      let plan, data;
+      try {
+        data = readBackup(await file.text());
+        plan = planImport(data);
+      } catch (e) {
+        toast(e.message, 'warning-circle');
+        return;
+      }
+      if (!plan.add && !plan.update && !plan.trips && !plan.members) {
+        toast('这份备份里的记录都已经在账本里了', 'check');
+        return;
+      }
+      const bits = [];
+      if (plan.add) bits.push(`补回 ${plan.add} 笔`);
+      if (plan.update) bits.push(`更新 ${plan.update} 笔`);
+      if (plan.trips) bits.push(`${plan.trips} 个项目`);
+      if (plan.members) bits.push(`${plan.members} 位成员`);
+      if (plan.keep) bits.push(`${plan.keep} 笔本地更新，保持不动`);
+      confirmSheet({
+        title: '导入账本',
+        body: bits.join('，') + '。同一笔以更新的那一版为准，现有记录不会被旧备份盖掉。',
+        danger: '导入',
+        onOk: () => {
+          applyImport(data, plan);
+          toast(`已导入 ${plan.add + plan.update} 笔`, 'check');
+        },
+      });
+    };
+    f.click();
   };
 
   const clr = $('[data-clear]');
@@ -2113,6 +2156,112 @@ async function syncNow({ manual = false } = {}) {
 }
 
 /** 把服务器数据并回本地。返回「有没有真的变了」，没变就不重绘。 */
+/* ==========================================================================
+   导入账本
+
+   合并规则和同步完全一致：按 id 比 updatedAt，谁新谁赢。
+   所以导入一份旧备份不会盖掉现在更新的记录，只会把缺的补回来 —— 导入是「合并」，
+   不是「还原」，重复导入同一个文件也不会多出东西。
+
+   刻意不读文件里的 sync：账本码是「连到哪个账本」的钥匙，让它跟着备份走，
+   会把人静悄悄换到另一个账本上，而且旧码可能早就断开了。
+   ========================================================================== */
+function readBackup(raw) {
+  let data;
+  try { data = JSON.parse(raw); } catch { throw new Error('这个文件不是账本备份'); }
+  if (!data || !Array.isArray(data.members) || !Array.isArray(data.expenses)) {
+    throw new Error('这个文件不是账本备份');
+  }
+  return data;
+}
+
+/* 先算一遍会发生什么，好在确认框里如实说清楚，而不是导完再解释 */
+function planImport(data) {
+  const ids = (data.members || []).map((m) => m.id);
+  /* 比内容时两边都要先过同一套整形，否则「字段缺失」和「字段是 null」、
+     以及键的先后顺序都会被当成不一样。dirty 是本地标记，updatedAt 单独比，都不算内容。 */
+  const bare = (r) => {
+    const { dirty, updatedAt, ...rest } = r;
+    return JSON.stringify(rest, Object.keys(rest).sort());
+  };
+  const same = (a, b) => bare(a) === bare(b);
+  const plan = { add: 0, update: 0, keep: 0, trips: 0, members: 0, entries: [], tripRecs: [] };
+
+  const walk = (incoming, local, norm, onAdd, onUpdate) => {
+    for (const inc of incoming || []) {
+      if (!inc || !inc.id) continue;
+      const rec = norm(inc);
+      if (!rec.updatedAt) rec.updatedAt = '1970-01-01T00:00:00.000Z';  // 老备份没这个字段
+      const cur = local.find((x) => x.id === rec.id);
+      if (!cur) { onAdd(rec); continue; }
+      // 内容一模一样就别算进「要改的」。早期的记录没有 updatedAt，
+      // 光比时间戳会把一堆没差别的记录报成「更新」，确认框里的数就成了假的。
+      if (same(norm(cur), rec)) continue;
+      if ((cur.updatedAt || '') >= rec.updatedAt) { plan.keep++; continue; }
+      onUpdate(rec);
+    }
+  };
+
+  walk(data.expenses, state.expenses, (e) => normEntry(e, ids)[0],
+    (r) => { plan.add++; plan.entries.push(r); },
+    (r) => { plan.update++; plan.entries.push(r); });
+
+  walk(data.trips, state.trips, (t) => ({
+    id: t.id, name: t.name || '', from: t.from || '', to: t.to || '',
+    currency: t.currency || '', deleted: !!t.deleted, updatedAt: t.updatedAt,
+  }), (r) => { plan.trips++; plan.tripRecs.push(r); },
+     (r) => { plan.trips++; plan.tripRecs.push(r); });
+
+  /* 成员：账本还是空的（一笔没记）就整份换成备份里的，这是「恢复到新设备」的情形。
+     已经有账了就只补缺的 id，不改现有的名字 —— 导备份不该把人改名。
+     这里不卡 MAX_MEMBERS：少一个成员会让引用他的记录算不出来，保数据优先。 */
+  const known = new Set(state.members.map((m) => m.id));
+  plan.replaceMembers = !state.expenses.some((e) => !e.deleted);
+  plan.newMembers = (data.members || []).filter((m) => m && m.id && !known.has(m.id));
+  plan.members = plan.replaceMembers
+    ? (data.members || []).length
+    : plan.newMembers.length;
+  return plan;
+}
+
+function applyImport(data, plan) {
+  if (plan.replaceMembers && data.members.length) state.members = data.members;
+  else plan.newMembers.forEach((m) => state.members.push(m));
+
+  const put = (list, rec) => {
+    const i = list.findIndex((x) => x.id === rec.id);
+    const stamped = { ...rec, dirty: true };   // 标脏，好推给同步的其他人
+    if (i >= 0) list[i] = stamped; else list.push(stamped);
+  };
+  plan.tripRecs.forEach((t) => put(state.trips, t));
+  plan.entries.forEach((e) => put(state.expenses, e));
+
+  if (activeTrip !== 'all' && activeTrip !== 'daily' && !tripOf(activeTrip)) activeTrip = 'all';
+  save();
+  render();
+  queueSync();
+}
+
+/* 一条记录从外面进来时统一整形。外面 = 服务器 pull，或者导入的备份文件。
+   ids 是当前成员，用来还原两人时代的 split 字段。返回 [记录, 是不是老结构]。 */
+function normEntry(e, ids) {
+  const parts = Array.isArray(e.participants) ? e.participants : null;
+  const others = ids.filter((id) => id !== e.payerId);
+  return [{
+    id: e.id, type: e.type || 'expense', payerId: e.payerId, amount: Number(e.amount) || 0,
+    currency: e.currency, cat: normCat(e.cat) || '', merchant: e.merchant || '',
+    note: e.note || '', date: e.date,
+    participants: parts || (
+      e.type === 'settle' ? []
+      : e.split === 'payer' ? [e.payerId]
+      : e.split === 'other' ? others
+      : ids.slice()),
+    toId: e.toId || (e.type === 'settle' ? others[0] || null : null),
+    tripId: e.tripId || null,
+    deleted: !!e.deleted, createdAt: Number(e.createdAt) || 0, updatedAt: e.updatedAt,
+  }, !parts];
+}
+
 function mergePull(out) {
   let changed = false;
 
@@ -2137,24 +2286,9 @@ function mergePull(out) {
   const ids = state.members.map((m) => m.id);
 
   mergeList(out.entries, state.expenses, (e) => {
-    let parts = Array.isArray(e.participants) ? e.participants : null;
-    if (!parts) {
-      legacyRows++;
-      const others = ids.filter((id) => id !== e.payerId);
-      parts = e.type === 'settle' ? []
-            : e.split === 'payer' ? [e.payerId]
-            : e.split === 'other' ? others
-            : ids.slice();
-    }
-    return {
-      id: e.id, type: e.type, payerId: e.payerId, amount: Number(e.amount),
-      currency: e.currency, cat: normCat(e.cat) || '', merchant: e.merchant || '',
-      note: e.note || '', date: e.date,
-      participants: parts,
-      toId: e.toId || (e.type === 'settle' ? ids.find((x) => x !== e.payerId) || null : null),
-      tripId: e.tripId || null,
-      deleted: !!e.deleted, createdAt: Number(e.createdAt) || 0, updatedAt: e.updatedAt,
-    };
+    const [rec, legacy] = normEntry(e, ids);
+    if (legacy) legacyRows++;
+    return rec;
   });
 
   if (legacyRows) schemaOutdated = true;
