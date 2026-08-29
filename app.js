@@ -1,10 +1,13 @@
 /* ==========================================================================
    WeTab — 几个人一起记账
-   零构建：原生 ES module。数据存 localStorage，汇率与小票识别走本地 Python 服务。
+   零构建：原生 ES module。数据存 localStorage，汇率走 frankfurter，同步走 Supabase。
    ========================================================================== */
 
 import { SUPABASE_URL, SUPABASE_KEY, SYNC_AVAILABLE,
-         RATES_URL, scanUrl, SCAN_AVAILABLE, SUPPORT_URL } from './config.js';
+         RATES_URL, SUPPORT_URL } from './config.js';
+/* 取名 tr 而不是 t：这份文件里 t 已经是 trip / tab 的循环变量，
+   叫 t 会被就近遮蔽，而且是那种不报错、只是一直显示中文的静默 bug。 */
+import { t as tr, getLang, setLang, LANGS } from './i18n.js';
 
 /* ---------- 小工具 ---------- */
 const $  = (sel, root = document) => root.querySelector(sel);
@@ -31,23 +34,23 @@ const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matche
    币种
    ========================================================================== */
 const CURRENCIES = {
-  HKD: { sym: 'HK$', name: '港币',   dec: 2 },
-  GBP: { sym: '£',   name: '英镑',   dec: 2 },
-  CNY: { sym: '¥',   name: '人民币', dec: 2 },
-  USD: { sym: 'US$', name: '美元',   dec: 2 },
-  EUR: { sym: '€',   name: '欧元',   dec: 2 },
-  JPY: { sym: 'JP¥', name: '日元',   dec: 0 },
-  KRW: { sym: '₩',   name: '韩元',   dec: 0 },
-  SGD: { sym: 'S$',  name: '新币',   dec: 2 },
-  AUD: { sym: 'A$',  name: '澳元',   dec: 2 },
-  CAD: { sym: 'C$',  name: '加元',   dec: 2 },
-  CHF: { sym: 'CHF', name: '瑞郎',   dec: 2 },
-  NZD: { sym: 'NZ$', name: '纽元',   dec: 2 },
-  THB: { sym: '฿',   name: '泰铢',   dec: 2 },
-  MYR: { sym: 'RM',  name: '马币',   dec: 2 },
-  IDR: { sym: 'Rp',  name: '印尼盾', dec: 0 },
-  PHP: { sym: '₱',   name: '比索',   dec: 2 },
-  INR: { sym: '₹',   name: '卢比',   dec: 2 },
+  HKD: { sym: 'HK$', dec: 2 },
+  GBP: { sym: '£', dec: 2 },
+  CNY: { sym: '¥', dec: 2 },
+  USD: { sym: 'US$', dec: 2 },
+  EUR: { sym: '€', dec: 2 },
+  JPY: { sym: 'JP¥', dec: 0 },
+  KRW: { sym: '₩', dec: 0 },
+  SGD: { sym: 'S$', dec: 2 },
+  AUD: { sym: 'A$', dec: 2 },
+  CAD: { sym: 'C$', dec: 2 },
+  CHF: { sym: 'CHF', dec: 2 },
+  NZD: { sym: 'NZ$', dec: 2 },
+  THB: { sym: '฿', dec: 2 },
+  MYR: { sym: 'RM', dec: 2 },
+  IDR: { sym: 'Rp', dec: 0 },
+  PHP: { sym: '₱', dec: 2 },
+  INR: { sym: '₹', dec: 2 },
 };
 const DISPLAY = ['HKD', 'GBP', 'CNY'];
 
@@ -106,11 +109,11 @@ function fmt(amount, cur, { sym = true } = {}) {
    分类
    ========================================================================== */
 const CATS = [
-  { id: 'food',    label: '餐饮', icon: 'fork-knife' },
-  { id: 'transit', label: '交通', icon: 'car' },
-  { id: 'stay',    label: '住宿', icon: 'bed' },
-  { id: 'shop',    label: '购物', icon: 'shopping-bag' },
-  { id: 'ticket',  label: '门票', icon: 'ticket' },
+  { id: 'food',    icon: 'fork-knife' },
+  { id: 'transit', icon: 'car' },
+  { id: 'stay',    icon: 'bed' },
+  { id: 'shop',    icon: 'shopping-bag' },
+  { id: 'ticket',  icon: 'ticket' },
 ];
 
 /* 旧账里的分类映射到新的五类。娱乐多半是门票，日用和医疗都归购物。 */
@@ -133,8 +136,8 @@ const dback = (back) => {
 
 function seedTrips() {
   return [
-    { id: 't-tokyo', name: '東京', from: dback(7), to: dback(5), currency: 'JPY' },
-    { id: 't-sz',    name: '深圳', from: dback(3), to: dback(2), currency: 'CNY' },
+    { id: 't-tokyo', name: tr('seed.tokyo'),    from: dback(7), to: dback(5), currency: 'JPY' },
+    { id: 't-sz',    name: tr('seed.shenzhen'), from: dback(3), to: dback(2), currency: 'CNY' },
   ];
 }
 
@@ -143,27 +146,32 @@ function seed() {
   const ids = state.members.map((m) => m.id);
   const ALL = () => ids.slice();
   const ONLY = (id) => [id];
+  const E = (n, payer, amount, currency, cat, date, parts, tripId, ago) => ({
+    id: uid(), type: 'expense', payerId: payer, amount, currency, cat,
+    merchant: tr(`seed.m${n}`), note: tr(`seed.n${n}`),
+    date, participants: parts, tripId, createdAt: Date.now() - ago,
+  });
   return [
-    { id: uid(), type: 'expense', payerId: 'a', amount: 486,  currency: 'HKD', cat: 'food',    merchant: '添好運 深水埗', note: '午飯',       date: d(0), participants: ALL(), tripId: null, createdAt: Date.now() - 1e5 },
-    { id: uid(), type: 'expense', payerId: 'b', amount: 128,  currency: 'HKD', cat: 'transit', merchant: '的士 尖沙咀→中環', note: '',       date: d(0), participants: ALL(), tripId: null, createdAt: Date.now() - 2e5 },
-    { id: uid(), type: 'expense', payerId: 'b', amount: 32.4, currency: 'GBP', cat: 'shop',    merchant: 'Boots',        note: '防曬同藥',   date: d(1), participants: ALL(), tripId: null, createdAt: Date.now() - 9e6 },
-    { id: uid(), type: 'expense', payerId: 'a', amount: 1240, currency: 'CNY', cat: 'stay',    merchant: '深圳灣民宿',     note: '兩晚',      date: d(2), participants: ALL(), tripId: 't-sz', createdAt: Date.now() - 2e7 },
-    { id: uid(), type: 'expense', payerId: 'a', amount: 268,  currency: 'HKD', cat: 'ticket',  merchant: 'Broadway 戲院',  note: '',         date: d(3), participants: ALL(), tripId: null, createdAt: Date.now() - 3e7 },
-    { id: uid(), type: 'expense', payerId: 'b', amount: 74.5, currency: 'HKD', cat: 'shop',    merchant: '惠康超市',       note: '',         date: d(4), participants: ALL(), tripId: null, createdAt: Date.now() - 4e7 },
-    { id: uid(), type: 'expense', payerId: 'a', amount: 9800, currency: 'JPY', cat: 'food',    merchant: '鮨 銀座おのでら', note: '生日飯',   date: d(6), participants: ONLY(ids[1]), tripId: 't-tokyo', createdAt: Date.now() - 6e7 },
+    E(1, 'a', 486,  'HKD', 'food',    d(0), ALL(), null,       1e5),
+    E(2, 'b', 128,  'HKD', 'transit', d(0), ALL(), null,       2e5),
+    E(3, 'b', 32.4, 'GBP', 'shop',    d(1), ALL(), null,       9e6),
+    E(4, 'a', 1240, 'CNY', 'stay',    d(2), ALL(), 't-sz',     2e7),
+    E(5, 'a', 268,  'HKD', 'ticket',  d(3), ALL(), null,       3e7),
+    E(6, 'b', 74.5, 'HKD', 'shop',    d(4), ALL(), null,       4e7),
+    E(7, 'a', 9800, 'JPY', 'food',    d(6), ONLY(ids[1]), 't-tokyo', 6e7),
   ];
 }
 
 /* 随机默认名字。分享给别人时，第一次打开不该看到别人的名字，
-   所以从这里抽两个不重样的，引导页里能摇也能直接改。 */
-const NAME_POOL = ['小雨', '阿哲', '子晴', '阿樂', '思思', '小满', '阿廉', '子軒',
-                   '阿霖', '一一', 'Mia', 'Leo', 'Nina', 'Kai', 'Remy', 'Sora'];
+   所以从这里抽两个不重样的，引导页里能摇也能直接改。名单跟着语言走。 */
+const NAME_POOL = () => tr('names');
 
 function pickNames() {
-  const a = Math.floor(Math.random() * NAME_POOL.length);
-  let b = Math.floor(Math.random() * (NAME_POOL.length - 1));
+  const pool = NAME_POOL();
+  const a = Math.floor(Math.random() * pool.length);
+  let b = Math.floor(Math.random() * (pool.length - 1));
   if (b >= a) b += 1;                       // 保证两个不一样
-  return [NAME_POOL[a], NAME_POOL[b]];
+  return [pool[a], pool[b]];
 }
 
 const DEFAULT_STATE = (() => {
@@ -202,7 +210,7 @@ function load() {
 }
 function save() {
   try { localStorage.setItem(KEY, JSON.stringify(state)); }
-  catch (e) { toast('无法写入本地存储，可能处于浏览器隐私模式', 'warning-circle'); }
+  catch (e) { toast(tr('err.storage'), 'warning-circle'); }
 }
 function setState(patch) { Object.assign(state, patch); save(); render(); }
 
@@ -349,24 +357,31 @@ function guessTrip(dateISO) {
   return hit ? hit.id : null;
 }
 
+/* 不用 M/D：英文里 8/9 分不清是 8 月 9 日还是 9 月 8 日。
+   月份用缩写就没有这个问题，中文那边照样是「8月9日」。 */
 const tripRange = (t) => {
   if (!t.from || !t.to) return '';
-  const f = (iso) => `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}`;
+  const fmtD = new Intl.DateTimeFormat(getLang() === 'zh' ? 'zh-Hant-HK' : 'en-GB',
+                                       { month: 'short', day: 'numeric' });
+  const f = (iso) => fmtD.format(new Date(iso + 'T00:00:00'));
   return t.from === t.to ? f(t.from) : `${f(t.from)} - ${f(t.to)}`;
 };
 
 /* ==========================================================================
    日期
    ========================================================================== */
-const WD = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+/* 星期和月日的排法两种语言不一样，交给 Intl，别自己拼 */
 function dayLabel(iso) {
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const d = new Date(iso + 'T00:00:00');
   const diff = Math.round((today - d) / 86400000);
-  if (diff === 0) return '今天';
-  if (diff === 1) return '昨天';
-  const y = d.getFullYear() !== today.getFullYear() ? `${d.getFullYear()}年` : '';
-  return `${y}${d.getMonth() + 1}月${d.getDate()}日 ${WD[d.getDay()]}`;
+  if (diff === 0) return tr('date.today');
+  if (diff === 1) return tr('date.yesterday');
+  const sameYear = d.getFullYear() === today.getFullYear();
+  return new Intl.DateTimeFormat(getLang() === 'zh' ? 'zh-Hant-HK' : 'en-GB', {
+    year: sameYear ? undefined : 'numeric',
+    month: 'long', day: 'numeric', weekday: 'short',
+  }).format(d);
 }
 const todayISO = () => {
   const t = new Date();
@@ -380,9 +395,9 @@ let route = 'ledger';
 let statsMonth = todayISO().slice(0, 7);
 
 const TABS = [
-  { id: 'ledger',   label: '账本', icon: 'receipt' },
-  { id: 'stats',    label: '统计', icon: 'chart-pie-slice' },
-  { id: 'settings', label: '设置', icon: 'gear' },
+  { id: 'ledger',   icon: 'receipt' },
+  { id: 'stats',    icon: 'chart-pie-slice' },
+  { id: 'settings', icon: 'gear' },
 ];
 
 function go(r) { route = r; render(); window.scrollTo({ top: 0, behavior: reduceMotion() ? 'auto' : 'smooth' }); }
@@ -409,29 +424,29 @@ function renderNav() {
   $('#nav').innerHTML = `
     <div class="nav__inner">
       ${TABS.slice(0, 1).map(navBtn).join('')}
-      <button class="fab" data-add title="记一笔" aria-label="记一笔">${icon('plus')}</button>
+      <button class="fab" data-add title="${tr('act.add')}" aria-label="${tr('act.add')}">${icon('plus')}</button>
       ${TABS.slice(1).map(navBtn).join('')}
     </div>`;
 }
-const navBtn = (t) => `
-  <button class="nav__btn" data-go="${t.id}" ${
-    route === t.id || (t.id === 'settings' && route === 'support') ? 'aria-current="page"' : ''}>
-    ${icon(t.icon)}<span>${t.label}</span>
+const navBtn = (tab) => `
+  <button class="nav__btn" data-go="${tab.id}" ${
+    route === tab.id || (tab.id === 'settings' && route === 'support') ? 'aria-current="page"' : ''}>
+    ${icon(tab.icon)}<span>${tr('nav.' + tab.id)}</span>
   </button>`;
 
 function renderRail() {
   $('#rail').innerHTML = `
     <div class="wordmark">${brand()}<span>WeTab</span></div>
-    ${TABS.map((t) => `
-      <button class="rail__btn" data-go="${t.id}" ${
-        route === t.id || (t.id === 'settings' && route === 'support') ? 'aria-current="page"' : ''}>
-        ${icon(t.icon)}<span>${t.label}</span>
+    ${TABS.map((tab) => `
+      <button class="rail__btn" data-go="${tab.id}" ${
+        route === tab.id || (tab.id === 'settings' && route === 'support') ? 'aria-current="page"' : ''}>
+        ${icon(tab.icon)}<span>${tr('nav.' + tab.id)}</span>
       </button>`).join('')}
-    <button class="btn btn--primary" data-add>${icon('plus')}记一笔</button>
+    <button class="btn btn--primary" data-add>${icon('plus')}${tr('act.add')}</button>
     <div class="rail__foot">
       ${isSynced()
         ? `<span class="syncdot" data-sync-badge data-state="${syncStatus}"><i></i><span>${syncLabel()}</span></span>`
-        : `<div class="footnote">数据仅保存在这台设备的浏览器中。</div>`}
+        : `<div class="footnote">${tr('localOnly')}</div>`}
     </div>`;
 }
 
@@ -455,20 +470,20 @@ function viewLedger() {
 
   /* 余额卡的主视觉：一笔转账时是个大数字，多笔时是一张清单 */
   const head = !list.length
-    ? `<div class="balance__label">${icon('scales')}<span>尚无账目</span></div>
+    ? `<div class="balance__label">${icon('scales')}<span>${tr('bal.none')}</span></div>
        <div class="balance__amount num">${fmt(0, state.display, { sym: false })}
          <span class="cur">${state.display}</span></div>`
     : settled
-    ? `<div class="balance__label">${icon('scales')}<span>账目已两清</span></div>
+    ? `<div class="balance__label">${icon('scales')}<span>${tr('bal.clear')}</span></div>
        <div class="balance__amount num">${fmt(0, state.display, { sym: false })}
          <span class="cur">${state.display}</span></div>`
     : moves.length === 1
     ? `<div class="balance__label">${icon('hand-coins')}
-         <span>${esc(memberName(moves[0].from))} 转给 ${esc(memberName(moves[0].to))}</span></div>
+         <span>${tr('bal.transferTo', esc(memberName(moves[0].from)), esc(memberName(moves[0].to)))}</span></div>
        <div class="balance__amount num">${fmt(moves[0].amount, state.display, { sym: false })}
          <span class="cur">${state.display}</span></div>
-       <p class="balance__sub">转账后两清</p>`
-    : `<div class="balance__label">${icon('hand-coins')}<span>${moves.length} 笔转账即可两清</span></div>
+       <p class="balance__sub">${tr('bal.afterClear')}</p>`
+    : `<div class="balance__label">${icon('hand-coins')}<span>${tr('bal.nMoves', moves.length)}</span></div>
        <div class="moves">
          ${moves.map((m) => `
            <div class="move">
@@ -486,19 +501,19 @@ function viewLedger() {
         ${head}
         <div class="balance__split">
           <div class="who who--head">
-            <span class="who__name">谁</span>
-            <span class="who__sum">该摊 ${state.display}</span>
+            <span class="who__name">${tr('bal.who')}</span>
+            <span class="who__sum">${tr('bal.owes', state.display)}</span>
           </div>
           ${ms.map((m) => who(m, totals[m.id] || 0)).join('')}
         </div>
         ${settled ? '' : `
           <button class="btn btn--ghost btn--block" data-settle style="margin-top:16px">
-            ${icon('arrow-u-down-left')}结算
+            ${icon('arrow-u-down-left')}${tr('act.settle')}
           </button>`}
       </section>
 
       <div>
-        <div class="seg" role="tablist" aria-label="显示币种">
+        <div class="seg" role="tablist" aria-label="${tr('bal.displayCur')}">
           ${DISPLAY.map((c) => `
             <button class="seg__btn" role="tab" data-cur="${c}"
               aria-selected="${state.display === c}">${c}</button>`).join('')}
@@ -506,41 +521,41 @@ function viewLedger() {
         <p class="rate-note">
           ${icon(rates.stale || rates.error ? 'warning-circle' : 'arrows-clockwise')}
           <span>${rates.stale || rates.error
-            ? '汇率取不到，用的是离线数据'
-            : `欧洲央行汇率 · ${rates.date || '今日'}`}</span>
-          <button data-refresh-rates>更新</button>
+            ? tr('rates.offline')
+            : tr('rates.ecb', rates.date || tr('rates.today'))}</span>
+          <button data-refresh-rates>${tr('act.update')}</button>
         </p>
       </div>
     </div>`;
 
   const tripBar = `
-    <div class="chips" role="tablist" aria-label="项目">
-      <button class="chip" role="tab" data-scope="all" aria-selected="${scope === 'all'}">全部</button>
+    <div class="chips" role="tablist" aria-label="${tr('trip.section')}">
+      <button class="chip" role="tab" data-scope="all" aria-selected="${scope === 'all'}">${tr('trip.all')}</button>
       <button class="chip" role="tab" data-scope="daily" aria-selected="${scope === 'daily'}">
-        ${icon('house-line')}日常
+        ${icon('house-line')}${tr('trip.daily')}
       </button>
       ${liveTrips().map((t) => `
         <button class="chip" role="tab" data-scope="${t.id}" aria-selected="${scope === t.id}">
           ${icon('airplane-tilt')}${esc(t.name)}
         </button>`).join('')}
-      <button class="chip chip--new" data-new-trip>${icon('plus')}新项目</button>
+      <button class="chip chip--new" data-new-trip>${icon('plus')}${tr('trip.new')}</button>
     </div>`;
 
   const tripHead = trip ? `
     <div class="triphead">
       <div class="triphead__main">
         <h2>${esc(trip.name)}</h2>
-        <p>${tripRange(trip) ? tripRange(trip) + ' · ' : ''}${list.filter((e) => e.type !== 'settle').length} 笔${
-          trip.currency ? ' · 默认 ' + trip.currency : ''}</p>
+        <p>${tripRange(trip) ? tripRange(trip) + ' · ' : ''}${tr('entries', list.filter((e) => e.type !== 'settle').length)}${
+          trip.currency ? ' · ' + tr('trip.defaultCur', trip.currency) : ''}</p>
       </div>
-      <button class="iconbtn" data-edit-trip="${trip.id}" aria-label="编辑项目">${icon('pencil-simple')}</button>
+      <button class="iconbtn" data-edit-trip="${trip.id}" aria-label="${tr('trip.edit')}">${icon('pencil-simple')}</button>
     </div>` : '';
 
   const emptyCopy = scope === 'all'
-    ? { h: '还没有记录', p: '所有人的开销都记进来，账才算得准。' }
+    ? { h: tr('ledger.empty'), p: tr('ledger.emptyHint') }
     : scope === 'daily'
-    ? { h: '日常暂无记录', p: '未归入项目的开销会出现在这里。' }
-    : { h: `${trip ? trip.name : '这个项目'}暂无记录`, p: '这次的开销单独算在这里。' };
+    ? { h: tr('ledger.dailyEmpty'), p: tr('ledger.dailyEmptyHint') }
+    : { h: tr('ledger.tripEmpty', trip ? trip.name : tr('ledger.thisTrip')), p: tr('ledger.tripEmptyHint') };
 
   const body = list.length === 0 ? `
     <div class="empty">
@@ -548,11 +563,11 @@ function viewLedger() {
       <h3>${esc(emptyCopy.h)}</h3>
       <p>${esc(emptyCopy.p)}</p>
       <button class="btn btn--primary" data-add>${
-        SCAN_AVAILABLE() ? icon('camera') + '拍小票记账' : icon('plus') + '记第一笔'}</button>
+        icon('plus') + tr('ledger.addFirst')}</button>
     </div>` : `
     <div class="sec">
-      <h2>开销</h2>
-      <span class="sec__aside">共 ${list.length} 笔</span>
+      <h2>${tr('ledger.spend')}</h2>
+      <span class="sec__aside">${tr('ledger.total', list.length)}</span>
     </div>
     ${groups.map(dayGroup).join('')}`;
 
@@ -609,8 +624,8 @@ function rowHTML(e, i = 0) {
       <button ${delay} data-open="${e.id}">
         <div class="tile tile--accent">${icon('arrow-u-down-left')}</div>
         <div class="row__body">
-          <div class="row__title">结算 · ${esc(payer)} 转给 ${esc(to)}</div>
-          <div class="row__meta"><span>不计入统计</span>${tripTag}</div>
+          <div class="row__title">${tr('row.settleTitle', esc(payer), esc(to))}</div>
+          <div class="row__meta"><span>${tr('row.notCounted')}</span>${tripTag}</div>
         </div>
         <div class="row__amt"><div class="big num">${fmt(shown, state.display)}</div>${orig}</div>
       </button>`;
@@ -620,18 +635,18 @@ function rowHTML(e, i = 0) {
   const parts = e.participants || [];
   const all = liveMembers().length;
   const splitTxt =
-    parts.length === 0 ? '未分摊'
-    : parts.length === 1 && parts[0] === e.payerId ? `${esc(payer)} 自己`
-    : parts.length === 1 ? `记在 ${esc(memberName(parts[0]))}`
-    : parts.length >= all ? `${parts.length} 人均摊`
-    : `${parts.map((id) => esc(memberName(id))).join('、')} 均摊`;
+    parts.length === 0 ? tr('split.none')
+    : parts.length === 1 && parts[0] === e.payerId ? tr('split.self', esc(payer))
+    : parts.length === 1 ? tr('split.onOne', esc(memberName(parts[0])))
+    : parts.length >= all ? tr('split.evenN', parts.length)
+    : tr('split.among', parts.map((id) => esc(memberName(id))).join(tr('listSep')));
   return `
     <button ${delay} data-open="${e.id}">
       <div class="tile">${icon(c.icon)}</div>
       <div class="row__body">
-        <div class="row__title">${esc(e.merchant || c.label)}</div>
+        <div class="row__title">${esc(e.merchant || tr('cat.' + c.id))}</div>
         <div class="row__meta">
-          <span>${esc(payer)} 付</span><i class="dot"></i><span>${splitTxt}</span>${tripTag}
+          <span>${tr('row.paid', esc(payer))}</span><i class="dot"></i><span>${splitTxt}</span>${tripTag}
           ${e.note ? `<i class="dot"></i><span class="row__note">${esc(e.note)}</span>` : ''}
         </div>
       </div>
@@ -657,42 +672,42 @@ function viewStats() {
 
   const head = `
     <div class="sec">
-      <h2>统计</h2>
+      <h2>${tr('stats.title')}</h2>
       <div class="monthnav">
-        <button data-month="-1" aria-label="上个月">${icon('caret-left')}</button>
-        <span class="monthnav__label">${y} 年 ${m} 月</span>
-        <button data-month="1" aria-label="下个月" ${atCurrent ? 'disabled' : ''}>${icon('caret-right')}</button>
+        <button data-month="-1" aria-label="${tr('stats.prevMonth')}">${icon('caret-left')}</button>
+        <span class="monthnav__label">${tr('stats.month', y, m)}</span>
+        <button data-month="1" aria-label="${tr('stats.nextMonth')}" ${atCurrent ? 'disabled' : ''}>${icon('caret-right')}</button>
       </div>
     </div>`;
 
   if (!inMonth.length) return head + `
     <div class="empty">
       ${icon('chart-pie-slice')}
-      <h3>本月暂无记录</h3>
-      <p>记几笔之后，这里会按分类拆开。</p>
+      <h3>${tr('stats.empty')}</h3>
+      <p>${tr('stats.emptyHint')}</p>
     </div>
     ${tripsSection()}`;
 
   return head + `
     <section class="balance" style="margin-bottom:20px">
-      <div class="balance__label">${icon('wallet')}<span>本月支出</span></div>
+      <div class="balance__label">${icon('wallet')}<span>${tr('stats.monthSpend')}</span></div>
       <div class="balance__amount num">${fmt(total, state.display, { sym: false })}<span class="cur">${state.display}</span></div>
       <div class="balance__split">
         <div class="who who--head">
-          <span class="who__name">谁</span>
-          <span class="who__sum">该摊 ${state.display}</span>
+          <span class="who__name">${tr('bal.who')}</span>
+          <span class="who__sum">${tr('bal.owes', state.display)}</span>
         </div>
         ${liveMembers().map((m) => who(m, totals[m.id] || 0)).join('')}
       </div>
     </section>
 
-    <div class="sec"><h2>分类</h2><span class="sec__aside">${byCat.length} 类</span></div>
+    <div class="sec"><h2>${tr('stats.cats')}</h2><span class="sec__aside">${tr('stats.nCats', byCat.length)}</span></div>
     <div class="statcard">
       ${byCat.map((c, i) => `
         <div class="catline">
           <div class="catline__top">
             ${icon(c.icon)}
-            <span class="catline__name">${c.label}</span>
+            <span class="catline__name">${tr('cat.' + c.id)}</span>
             <span class="catline__pct num">${Math.round((c.sum / total) * 100)}%</span>
             <span class="catline__val num">${fmt(c.sum, state.display)}</span>
           </div>
@@ -706,12 +721,12 @@ function viewStats() {
 /* 「按项目」看的是每个项目的全部花费，不受上面的月份影响 */
 function tripsSection() {
   if (!liveTrips().length) return `
-    <div class="sec"><h2>项目</h2></div>
+    <div class="sec"><h2>${tr('trip.section')}</h2></div>
     <div class="empty">
       ${icon('airplane-tilt')}
-      <h3>还没有项目</h3>
-      <p>每次出行建一个项目，这趟的开销单独算。</p>
-      <button class="btn btn--primary" data-new-trip>${icon('plus')}新建项目</button>
+      <h3>${tr('trip.none')}</h3>
+      <p>${tr('trip.noneHint')}</p>
+      <button class="btn btn--primary" data-new-trip>${icon('plus')}${tr('trip.newFull')}</button>
     </div>`;
 
   const sums = liveTrips().map((t) => tripSummary(t))
@@ -720,16 +735,16 @@ function tripsSection() {
 
   return `
     <div class="sec">
-      <h2>项目</h2>
-      <button class="btn btn--quiet" data-new-trip>${icon('plus')}新建</button>
+      <h2>${tr('trip.section')}</h2>
+      <button class="btn btn--quiet" data-new-trip>${icon('plus')}${tr('act.new')}</button>
     </div>
     <div class="tripgrid">
       ${sums.map((s, i) => `
         <button class="tripcard" data-open-trip="${s.trip.id}">
           <div class="tripcard__top">
             <span class="tripcard__name">${icon('airplane-tilt')}${esc(s.trip.name)}</span>
-            <span class="tripcard__meta">${tripRange(s.trip) || '未设日期'}${
-              s.days ? ' · ' + s.days + ' 天' : ''}</span>
+            <span class="tripcard__meta">${tripRange(s.trip) || tr('trip.noDate')}${
+              s.days ? ' · ' + tr('trip.days', s.days) : ''}</span>
           </div>
           <div class="tripcard__amt num">${fmt(s.total, state.display, { sym: false })}
             <span class="cur">${state.display}</span></div>
@@ -740,8 +755,8 @@ function tripsSection() {
           </div>
           ${!s.settle.length ? '' : `
             <div class="tripcard__net">${s.settle.length === 1
-              ? `${esc(memberName(s.settle[0].from))} 转 ${fmt(s.settle[0].amount, state.display)} 即可结清`
-              : `${s.settle.length} 笔转账即可结清`}</div>`}
+              ? tr('trip.oneMove', esc(memberName(s.settle[0].from)), fmt(s.settle[0].amount, state.display))
+              : tr('trip.nMoves', s.settle.length)}</div>`}
         </button>`).join('')}
     </div>`;
 }
@@ -810,9 +825,9 @@ const artWave = (cls = 'art') => `
   </svg>`;
 
 const TIERS = [
-  { art: artCoffee,   label: '一杯咖啡',   note: '够我写完下一个小功能' },
-  { art: artSandwich, label: '一个三明治', note: '刚好是一顿午饭' },
-  { art: artBowl,     label: '一顿好的',   note: '那我可能会加个预算提醒' },
+  { id: 'coffee',   art: artCoffee },
+  { id: 'sandwich', art: artSandwich },
+  { id: 'meal',     art: artBowl },
 ];
 
 /* ---------- 支持页 ---------- */
@@ -820,26 +835,25 @@ function viewSupport() {
   return `
     <div class="sec" style="margin-top:8px">
       <button class="btn btn--quiet" data-go="settings" style="margin-left:-14px">
-        ${icon('caret-left')}设置
+        ${icon('caret-left')}${tr('nav.settings')}
       </button>
     </div>
 
     <section class="support">
       ${artCoffee('art art--hero')}
-      <h2 class="support__title">请我喝杯咖啡</h2>
+      <h2 class="support__title">${tr('sup.title')}</h2>
       <p class="support__lead">
-        WeTab 是免费的，没有广告，也不会拿你的账目去做任何事。
-        如果它帮你省掉了几次「上次那顿谁付的」，随意就好。
+        ${tr('sup.body')}
       </p>
     </section>
 
     <div class="tiers">
-      ${TIERS.map((t) => `
+      ${TIERS.map((tier) => `
         <a class="tier" href="${esc(SUPPORT_URL)}" target="_blank" rel="noopener noreferrer">
-          ${t.art('art art--tier')}
+          ${tier.art('art art--tier')}
           <span class="tier__body">
-            <span class="tier__label">${t.label}</span>
-            <span class="tier__note">${t.note}</span>
+            <span class="tier__label">${tr('sup.' + tier.id)}</span>
+            <span class="tier__note">${tr('sup.' + tier.id + 'Note')}</span>
           </span>
           ${icon('arrow-right', 'icon tier__go')}
         </a>`).join('')}
@@ -847,37 +861,37 @@ function viewSupport() {
 
     <div class="support__foot">
       ${artWave('art art--wave')}
-      <p>不请也完全没关系，好好记账就是最好的支持。</p>
+      <p>${tr('sup.foot')}</p>
     </div>`;
 }
 
 /* ---------- 设置 ---------- */
 function viewSettings() {
   return `
-    <div class="sec"><h2>设置</h2></div>
+    <div class="sec"><h2>${tr('set.title')}</h2></div>
 
     <div class="card">
       ${liveMembers().map((m, i) => `
         <div class="listrow">
           ${avatar(m.id, 'sm')}
           <input class="nameinput" data-name="${m.id}" value="${esc(m.name)}"
-                 maxlength="12" aria-label="成员 ${i + 1} 的名字">
+                 maxlength="12" aria-label="${tr('set.memberName', i + 1)}">
           ${liveMembers().length > 2
-            ? `<button class="iconbtn" data-rm-member="${m.id}" aria-label="移除 ${esc(m.name)}">${icon('x')}</button>`
+            ? `<button class="iconbtn" data-rm-member="${m.id}" aria-label="${tr('set.removeMember', esc(m.name))}">${icon('x')}</button>`
             : ''}
         </div>`).join('')}
       ${liveMembers().length < MAX_MEMBERS ? `
         <button class="listrow" data-add-member>
           ${icon('user-plus')}
-          <span class="listrow__label">加一个人</span>
+          <span class="listrow__label">${tr('set.addPerson')}</span>
         </button>` : ''}
     </div>
 
     ${lookPanel()}
 
     <div class="sec">
-      <h2>项目</h2>
-      <button class="btn btn--quiet" data-new-trip>${icon('plus')}新建</button>
+      <h2>${tr('trip.section')}</h2>
+      <button class="btn btn--quiet" data-new-trip>${icon('plus')}${tr('act.new')}</button>
     </div>
     ${liveTrips().length ? `
       <div class="card">
@@ -885,21 +899,21 @@ function viewSettings() {
           <button class="listrow" data-edit-trip="${t.id}">
             ${icon('airplane-tilt')}
             <span class="listrow__label">${esc(t.name)}</span>
-            <span class="listrow__value">${
-              liveExpenses().filter((e) => e.tripId === t.id && e.type !== 'settle').length} 笔</span>
+            <span class="listrow__value">${tr('entries',
+              liveExpenses().filter((e) => e.tripId === t.id && e.type !== 'settle').length)}</span>
             ${icon('caret-right')}
           </button>`).join('')}
       </div>` : `
-      <p class="footnote" style="padding-top:0">出行前建一个，这次的开销单独结算。</p>`}
+      <p class="footnote" style="padding-top:0">${tr('trip.beforeTrip')}</p>`}
 
-    <div class="sec"><h2>币种</h2></div>
-    <div class="seg" role="tablist" aria-label="默认显示币种">
+    <div class="sec"><h2>${tr('set.currency')}</h2></div>
+    <div class="seg" role="tablist" aria-label="${tr('set.defaultCur')}">
       ${DISPLAY.map((c) => `
         <button class="seg__btn" role="tab" data-cur="${c}" aria-selected="${state.display === c}">
-          ${c} · ${CURRENCIES[c].name}
+          ${c} · ${tr('cur.' + c)}
         </button>`).join('')}
     </div>
-    <p class="footnote">只影响这台设备。</p>
+    <p class="footnote">${tr('set.thisDeviceOnly')}</p>
 
     ${SYNC_AVAILABLE ? syncPanel() : ''}
 
@@ -907,34 +921,34 @@ function viewSettings() {
       <div class="card" style="margin-top:26px">
         <button class="listrow" data-go="support">
           ${artCoffee('art art--row')}
-          <span class="listrow__label">支持开发者</span>
+          <span class="listrow__label">${tr('set.support')}</span>
           ${icon('caret-right')}
         </button>
       </div>` : ''}
 
-    <div class="sec"><h2>数据</h2></div>
+    <div class="sec"><h2>${tr('set.data')}</h2></div>
     <div class="card">
       <button class="listrow" data-refresh-rates>
         ${icon('arrows-clockwise')}
-        <span class="listrow__label">更新汇率</span>
-        <span class="listrow__value num">${rates.date || '离线'}</span>
+        <span class="listrow__label">${tr('set.refreshRates')}</span>
+        <span class="listrow__value num">${rates.date || tr('set.offline')}</span>
       </button>
       <button class="listrow" data-export>
         ${icon('note-pencil')}
-        <span class="listrow__label">导出账本</span>
-        <span class="listrow__value">${liveExpenses().length} 笔</span>
+        <span class="listrow__label">${tr('set.export')}</span>
+        <span class="listrow__value">${tr('entries', liveExpenses().length)}</span>
       </button>
       <button class="listrow" data-import>
         ${icon('arrows-clockwise')}
-        <span class="listrow__label">导入账本</span>
+        <span class="listrow__label">${tr('set.import')}</span>
       </button>
       <button class="listrow" data-clear>
         ${icon('trash')}
-        <span class="listrow__label">清空账本</span>
+        <span class="listrow__label">${tr('set.clear')}</span>
       </button>
     </div>
     <p class="footnote">
-      账目存在本机浏览器里。小票照片只在识别时发出，用完即弃。
+      ${tr('set.storedLocally')}
     </p>`;
 }
 
@@ -942,50 +956,50 @@ function viewSettings() {
 /* ---------- 同步面板 ---------- */
 function syncPanel() {
   if (!isSynced()) return `
-    <div class="sec"><h2>同步</h2></div>
+    <div class="sec"><h2>${tr('sync.title')}</h2></div>
     <div class="card">
       <button class="listrow" data-sync-create>
         ${icon('users')}
-        <span class="listrow__label">创建账本</span>
+        <span class="listrow__label">${tr('sync.createLedger')}</span>
         ${icon('caret-right')}
       </button>
       <button class="listrow" data-sync-join>
         ${icon('user-plus')}
-        <span class="listrow__label">加入账本</span>
+        <span class="listrow__label">${tr('sync.joinLedger')}</span>
         ${icon('caret-right')}
       </button>
     </div>
     <p class="footnote">
-      账目现在只在这台设备上。创建后会得到一个账本码，发给对方即可合并。
+      ${tr('sync.localHint')}
     </p>`;
 
   return `
-    <div class="sec"><h2>同步</h2></div>
+    <div class="sec"><h2>${tr('sync.title')}</h2></div>
     <div class="card">
       <div class="listrow">
         <span class="syncdot" data-sync-badge data-state="${syncStatus}"><i></i><span>${syncLabel()}</span></span>
       </div>
       <div class="listrow codeRow">
         <div style="flex:1;min-width:0">
-          <div class="label" style="margin-bottom:5px">账本码</div>
+          <div class="label" style="margin-bottom:5px">${tr('sync.code')}</div>
           <div class="codeval num">${esc(syncState.code)}</div>
         </div>
         <button class="btn btn--ghost" data-copy-code style="height:38px;padding:0 16px">
-          ${icon('check')}复制
+          ${icon('check')}${tr('act.copy')}
         </button>
       </div>
       <button class="listrow" data-sync-now>
         ${icon('arrows-clockwise')}
-        <span class="listrow__label">同步</span>
+        <span class="listrow__label">${tr('sync.title')}</span>
         <span class="listrow__value" data-sync-status>${syncLabel()}</span>
       </button>
       <button class="listrow" data-sync-off>
         ${icon('x')}
-        <span class="listrow__label">断开</span>
+        <span class="listrow__label">${tr('sync.disconnect')}</span>
       </button>
     </div>
     <p class="footnote">
-      账本码相当于钥匙，请勿公开分享。
+      ${tr('sync.keyWarning')}
     </p>`;
 }
 
@@ -993,29 +1007,29 @@ function syncPanel() {
 function openSyncCreate() {
   const n = liveExpenses().length;
   openSheet({
-    title: '创建共享账本',
+    title: tr('sync.createTitle'),
     body: `
       <div class="alert">${icon('users')}
-        <span>会生成一个账本码。对方输入后即可加入，两边的账自动合并。</span></div>
+        <span>${tr('sync.createIntro')}</span></div>
       <p style="font-size:14px;color:var(--ink-2);line-height:1.65;margin-top:16px">
-        这台设备上现有的 ${n} 笔记录${liveTrips().length ? ` 和 ${liveTrips().length} 个项目` : ''}会一并上传，作为共享账本的起点。
+        ${tr('sync.createUpload', n, liveTrips().length)}
       </p>
       <p class="hint" style="margin-top:10px">
-        对方加入时，其本机记录会被替换。建议由记录更全的一方创建。
+        ${tr('sync.createWarn')}
       </p>`,
-    foot: `<button class="btn btn--ghost" data-close>取消</button>
-           <button class="btn btn--primary" data-ok>${icon('check')}创建</button>`,
+    foot: `<button class="btn btn--ghost" data-close>${tr('act.cancel')}</button>
+           <button class="btn btn--primary" data-ok>${icon('check')}${tr('act.create')}</button>`,
     onMount: (host) => {
       host.querySelector('[data-ok]').onclick = async (ev) => {
         const b = ev.currentTarget;
-        b.disabled = true; b.textContent = '创建中…';
+        b.disabled = true; b.textContent = tr('sync.creating');
         try {
           const code = await createLedger();
           closeSheetNow(); render();
           openSyncCode(code);
         } catch (err) {
-          b.disabled = false; b.innerHTML = '创建';
-          toast(`创建失败：${err.message}`, 'warning-circle');
+          b.disabled = false; b.innerHTML = tr('act.create');
+          toast(tr('sync.createFailed', err.message), 'warning-circle');
         }
       };
     },
@@ -1024,17 +1038,17 @@ function openSyncCreate() {
 
 function openSyncCode(code) {
   openSheet({
-    title: '账本已创建',
+    title: tr('sync.createdTitle'),
     body: `
       <p style="font-size:14px;color:var(--ink-2);line-height:1.65">
-        把它发给对方，在「加入账本」里输入即可。
+        ${tr('sync.createdHint')}
       </p>
       <div class="codebig num">${esc(code)}</div>
-      <button class="btn btn--ghost btn--block" data-copy-code>${icon('check')}复制账本码</button>
+      <button class="btn btn--ghost btn--block" data-copy-code>${icon('check')}${tr('sync.copyCode')}</button>
       <p class="hint" style="margin-top:14px">
-        设置页中随时可以找到。
+        ${tr('sync.foundInSettings')}
       </p>`,
-    foot: `<button class="btn btn--primary" data-close>好的</button>`,
+    foot: `<button class="btn btn--primary" data-close>${tr('act.ok')}</button>`,
     onMount: (host) => {
       host.querySelector('[data-copy-code]').onclick = () => copyCode(code);
     },
@@ -1044,35 +1058,35 @@ function openSyncCode(code) {
 function openSyncJoin() {
   const n = liveExpenses().length;
   openSheet({
-    title: '用账本码加入',
+    title: tr('sync.joinTitle'),
     body: `
       <div class="field">
-        <label class="label" for="jn-code">账本码</label>
-        <input class="input num" id="jn-code" placeholder="12 位字母与数字"
+        <label class="label" for="jn-code">${tr('sync.code')}</label>
+        <input class="input num" id="jn-code" placeholder="${tr('sync.codePlaceholder')}"
                autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="20">
         <p class="err" id="jn-err" hidden></p>
       </div>
       ${n ? `
         <div class="alert" style="margin-top:16px">${icon('warning-circle')}
-          <span>这台设备上现有的 ${n} 笔记录，会被替换为账本中的内容。若这些记录尚未同步，请先完成同步再加入。</span>
+          <span>${tr('sync.joinWarn', n)}</span>
         </div>` : ''}`,
-    foot: `<button class="btn btn--ghost" data-close>取消</button>
-           <button class="btn btn--primary" data-ok>${icon('check')}加入</button>`,
+    foot: `<button class="btn btn--ghost" data-close>${tr('act.cancel')}</button>
+           <button class="btn btn--primary" data-ok>${icon('check')}${tr('act.join')}</button>`,
     onMount: (host) => {
       const input = host.querySelector('#jn-code');
       const err = host.querySelector('#jn-err');
       const go = async (ev) => {
         const b = host.querySelector('[data-ok]');
         const v = input.value.trim();
-        if (v.length < 6) { err.textContent = '账本码不完整'; err.hidden = false; return; }
+        if (v.length < 6) { err.textContent = tr('sync.codeShort'); err.hidden = false; return; }
         err.hidden = true; b.disabled = true;
         try {
           await joinLedger(v);
           closeSheetNow(); render(); startSyncLoop();
-          toast('已加入', 'check');
+          toast(tr('sync.joined'), 'check');
         } catch (e2) {
           b.disabled = false;
-          err.textContent = e2.pgcode === 'P0002' ? '账本码有误' : `加入失败：${e2.message}`;
+          err.textContent = e2.pgcode === 'P0002' ? tr('sync.codeBad') : tr('sync.joinFailed', e2.message);
           err.hidden = false;
           input.focus();
         }
@@ -1087,9 +1101,9 @@ function openSyncJoin() {
 async function copyCode(code) {
   try {
     await navigator.clipboard.writeText(code);
-    toast('账本码已复制', 'check');
+    toast(tr('sync.copied'), 'check');
   } catch {
-    toast('复制失败，请手动选中', 'warning-circle');
+    toast(tr('sync.copyFailed'), 'warning-circle');
   }
 }
 
@@ -1099,15 +1113,15 @@ async function copyCode(code) {
    都是本机设置，不跟着账本同步 —— 你在香港想要青瓷，对方想要墨色，各挑各的。
    ========================================================================== */
 const PALETTES = [
-  { id: 'cobalt', label: '钴蓝', swatch: ['#2F53D6', '#EEF0ED', '#14171A'], themeColor: { light: '#EEF0ED', dark: '#0D0F11' } },
-  { id: 'celadon', label: '青瓷', swatch: ['#2E7D6A', '#EDF1EE', '#131A17'], themeColor: { light: '#EDF1EE', dark: '#0B100E' } },
-  { id: 'indigo', label: '黛紫', swatch: ['#5B52A3', '#EFEEF3', '#17161F'], themeColor: { light: '#EFEEF3', dark: '#0E0D13' } },
-  { id: 'mist', label: '雾灰', swatch: ['#4A6070', '#EEEFF0', '#15181B'], themeColor: { light: '#EEEFF0', dark: '#0D0F10' } }
+  { id: 'cobalt', swatch: ['#2F53D6', '#EEF0ED', '#14171A'], themeColor: { light: '#EEF0ED', dark: '#0D0F11' } },
+  { id: 'celadon', swatch: ['#2E7D6A', '#EDF1EE', '#131A17'], themeColor: { light: '#EDF1EE', dark: '#0B100E' } },
+  { id: 'indigo', swatch: ['#5B52A3', '#EFEEF3', '#17161F'], themeColor: { light: '#EFEEF3', dark: '#0E0D13' } },
+  { id: 'mist', swatch: ['#4A6070', '#EEEFF0', '#15181B'], themeColor: { light: '#EEEFF0', dark: '#0D0F10' } }
 ];
 const MODES = [
-  { id: 'auto',  label: '跟随系统' },
-  { id: 'light', label: '浅色' },
-  { id: 'dark',  label: '深色' },
+  { id: 'auto' },
+  { id: 'light' },
+  { id: 'dark' },
 ];
 const LOOK_KEY = 'wetab.look.v1';
 
@@ -1147,27 +1161,33 @@ function setLook(patch) {
   render();
 }
 
-/* ---------- 设置页的外观面板 ---------- */
+/* ---------- 设置页的外观面板 ----------
+   语言并在这里：和配色、明暗一样，都是只影响这台设备的显示偏好。 */
 function lookPanel() {
   return `
-    <div class="sec"><h2>外观</h2></div>
-    <div class="swatches" role="radiogroup" aria-label="配色">
+    <div class="sec"><h2>${tr('set.appearance')}</h2></div>
+    <div class="seg" role="tablist" aria-label="${tr('set.language')}">
+      ${LANGS.map((l) => `
+        <button class="seg__btn" role="tab" data-lang="${l.id}"
+          aria-selected="${getLang() === l.id}">${l.label}</button>`).join('')}
+    </div>
+    <div class="swatches" role="radiogroup" aria-label="${tr('set.palette')}" style="margin-top:10px">
       ${PALETTES.map((p) => `
         <button class="swatch" role="radio" data-palette="${p.id}"
                 aria-checked="${look.palette === p.id}">
           <span class="swatch__chip">
             ${p.swatch.map((c) => `<i style="background:${c}"></i>`).join('')}
           </span>
-          <span class="swatch__name">${p.label}</span>
+          <span class="swatch__name">${tr('pal.' + p.id)}</span>
         </button>`).join('')}
     </div>
 
-    <div class="seg" role="tablist" aria-label="明暗">
+    <div class="seg" role="tablist" aria-label="${tr('set.mode')}">
       ${MODES.map((m) => `
         <button class="seg__btn" role="tab" data-mode="${m.id}"
-          aria-selected="${look.mode === m.id}">${m.label}</button>`).join('')}
+          aria-selected="${look.mode === m.id}">${tr('mode.' + m.id)}</button>`).join('')}
     </div>
-    <p class="footnote">只影响这台设备。</p>`;
+    <p class="footnote">${tr('set.thisDeviceOnly')}</p>`;
 }
 
 
@@ -1186,40 +1206,40 @@ function openOnboarding() {
   };
 
   openSheet({
-    title: '开始',
+    title: tr('ob.title'),
     dismissible: false,
     body: `
       <p style="font-size:14px;color:var(--ink-2);line-height:1.65">
-        填上两个名字。之后在设置里可以改，也可以再加人。
+        ${tr('ob.intro')}
       </p>
 
       <div class="namepair">
         <div class="field">
-          <label class="label" for="ob-a">你</label>
+          <label class="label" for="ob-a">${tr('ob.you')}</label>
           <input class="input" id="ob-a" maxlength="12" autocomplete="off" spellcheck="false">
         </div>
         <div class="field">
-          <label class="label" for="ob-b">对方</label>
+          <label class="label" for="ob-b">${tr('ob.other')}</label>
           <input class="input" id="ob-b" maxlength="12" autocomplete="off" spellcheck="false">
         </div>
-        <button class="iconbtn namepair__roll" id="ob-roll" title="换两个名字" aria-label="换两个名字">
+        <button class="iconbtn namepair__roll" id="ob-roll" title="${tr('ob.reroll')}" aria-label="${tr('ob.reroll')}">
           ${icon('arrows-clockwise')}
         </button>
       </div>
       <p class="err" id="ob-err" hidden></p>
 
       <div class="field" style="margin-top:24px">
-        <span class="label">从哪开始</span>
+        <span class="label">${tr('ob.startFrom')}</span>
         <div class="pick" id="ob-demo">
-          <button type="button" class="pickbtn" data-demo="0" aria-pressed="true">空账本</button>
-          <button type="button" class="pickbtn" data-demo="1" aria-pressed="false">示例数据</button>
+          <button type="button" class="pickbtn" data-demo="0" aria-pressed="true">${tr('ob.blank')}</button>
+          <button type="button" class="pickbtn" data-demo="1" aria-pressed="false">${tr('ob.demo')}</button>
         </div>
       </div>
 
       <p class="footnote" style="padding-top:20px">
-        已有账本码？<button id="ob-join" style="color:var(--accent);text-decoration:underline;text-underline-offset:2px">加入</button>
+        ${tr('ob.haveCode')}<button id="ob-join" style="color:var(--accent);text-decoration:underline;text-underline-offset:2px">${tr('act.join')}</button>
       </p>`,
-    foot: `<button class="btn btn--primary btn--block" data-ok>${icon('check')}开始</button>`,
+    foot: `<button class="btn btn--primary btn--block" data-ok>${icon('check')}${tr('act.start')}</button>`,
     onMount: (host) => {
       const q = (sel) => host.querySelector(sel);
       fill(host);
@@ -1242,10 +1262,10 @@ function openOnboarding() {
         const b = q('#ob-b').value.trim();
         const err = q('#ob-err');
         if (!a || !b) {
-          err.textContent = '填上两个名字'; err.hidden = false; return;
+          err.textContent = tr('ob.nameErr'); err.hidden = false; return;
         }
         if (a === b) {
-          err.textContent = '两个名字不能相同';
+          err.textContent = tr('ob.sameErr');
           err.hidden = false; return;
         }
         state.members = [{ id: 'a', name: a }, { id: 'b', name: b }];
@@ -1278,7 +1298,7 @@ function wireView() {
       el.disabled = true;
       await loadRates({ force: true });
       render();
-      toast(rates.error ? '汇率取不到，仍用离线数据' : '汇率已更新',
+      toast(rates.error ? tr('rates.stillOffline') : tr('rates.updated'),
             rates.error ? 'warning-circle' : 'check');
     });
   document.querySelectorAll('[data-open]').forEach((el) =>
@@ -1300,15 +1320,16 @@ function wireView() {
   const on = (sel, fn) => document.querySelectorAll(sel).forEach((el) => el.onclick = () => fn(el));
   on('[data-palette]', (el) => setLook({ palette: el.dataset.palette }));
   on('[data-mode]', (el) => setLook({ mode: el.dataset.mode }));
+  on('[data-lang]', (el) => { setLang(el.dataset.lang); render(); });
   on('[data-sync-create]', openSyncCreate);
   on('[data-sync-join]', openSyncJoin);
   on('[data-sync-now]', () => syncNow({ manual: true }));
   on('[data-copy-code]', () => copyCode(syncState.code));
   on('[data-sync-off]', () => confirmSheet({
-    title: '断开同步',
-    body: '这台设备不再与对方同步，账目原样保留在本机。之后用同一个账本码可以重新连接。',
-    danger: '断开',
-    onOk: () => { disconnectSync(); toast('已断开同步', 'check'); },
+    title: tr('sync.disconnectTitle'),
+    body: tr('sync.disconnectBody'),
+    danger: tr('sync.disconnect'),
+    onOk: () => { disconnectSync(); toast(tr('sync.disconnected'), 'check'); },
   }));
 
   document.querySelectorAll('[data-scope]').forEach((el) =>
@@ -1326,7 +1347,7 @@ function wireView() {
     for (let i = 0; i < 26 && used.has(id); i++) id = String.fromCharCode(97 + i + 1);
     if (used.has(id)) id = uid();
     const taken = new Set(liveMembers().map((m) => m.name));
-    const name = NAME_POOL.find((n) => !taken.has(n)) || '新成员';
+    const name = NAME_POOL().find((n) => !taken.has(n)) || tr('set.newMember');
     state.members.push({ id, name });
     touchMeta(); save(); render(); queueSync();
     // 直接聚焦新名字，方便立刻改
@@ -1340,15 +1361,15 @@ function wireView() {
     const n = liveExpenses().filter((e) =>
       e.payerId === id || e.toId === id || (e.participants || []).includes(id)).length;
     confirmSheet({
-      title: `移除 ${m.name}`,
+      title: tr('set.rmTitle', m.name),
       body: n
-        ? `${m.name} 参与了 ${n} 笔记录，这些记录会保留，名字也还看得到，只是之后记新账时不再出现。`
-        : `${m.name} 还没有任何记录，移除后不影响账目。`,
-      danger: '移除',
+        ? tr('set.rmBody', m.name, n)
+        : tr('set.rmEmpty', m.name),
+      danger: tr('set.rmOk'),
       onOk: () => {
         m.removed = true;
         touchMeta(); save(); render(); queueSync();
-        toast(`已移除 ${m.name}`, 'check');
+        toast(tr('set.removed', m.name), 'check');
       },
     });
   });
@@ -1383,22 +1404,22 @@ function wireView() {
         return;
       }
       if (!plan.add && !plan.update && !plan.trips && !plan.members) {
-        toast('这份备份里的记录都已经在账本里了', 'check');
+        toast(tr('imp.nothingNew'), 'check');
         return;
       }
       const bits = [];
-      if (plan.add) bits.push(`补回 ${plan.add} 笔`);
-      if (plan.update) bits.push(`更新 ${plan.update} 笔`);
-      if (plan.trips) bits.push(`${plan.trips} 个项目`);
-      if (plan.members) bits.push(`${plan.members} 位成员`);
-      if (plan.keep) bits.push(`${plan.keep} 笔本地更新，保持不动`);
+      if (plan.add) bits.push(tr('imp.add', plan.add));
+      if (plan.update) bits.push(tr('imp.update', plan.update));
+      if (plan.trips) bits.push(tr('imp.trips', plan.trips));
+      if (plan.members) bits.push(tr('imp.members', plan.members));
+      if (plan.keep) bits.push(tr('imp.keep', plan.keep));
       confirmSheet({
-        title: '导入账本',
-        body: bits.join('，') + '。同一笔以更新的那一版为准，现有记录不会被旧备份盖掉。',
-        danger: '导入',
+        title: tr('imp.title'),
+        body: tr('imp.body', bits.join(tr('imp.sep'))),
+        danger: tr('imp.ok'),
         onOk: () => {
           applyImport(data, plan);
-          toast(`已导入 ${plan.add + plan.update} 笔`, 'check');
+          toast(tr('imp.done', tr('entries', plan.add + plan.update)), 'check');
         },
       });
     };
@@ -1407,13 +1428,13 @@ function wireView() {
 
   const clr = $('[data-clear]');
   if (clr) clr.onclick = () => confirmSheet({
-    title: '清空所有记录',
-    body: '账本中的 ' + liveExpenses().length + ' 笔记录将被删除，且无法恢复。成员名称、项目与币种设置会保留。',
-    danger: '确认清空',
+    title: tr('clear.title'),
+    body: tr('clear.body', liveExpenses().length),
+    danger: tr('clear.ok'),
     onOk: () => {
       state.expenses.forEach((e) => { if (!e.deleted) { e.deleted = true; touch(e); } });
       state.seeded = false;
-      save(); render(); queueSync(); toast('已清空', 'check');
+      save(); render(); queueSync(); toast(tr('clear.done'), 'check');
     },
   });
 }
@@ -1454,7 +1475,7 @@ function openSheet({ title, body, foot, onMount, dismissible = true }) {
     <div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(title)}">
       <div class="sheet__head">
         <span class="sheet__title">${esc(title)}</span>
-        ${dismissible ? `<button class="iconbtn" data-close aria-label="关闭">${icon('x')}</button>` : ''}
+        ${dismissible ? `<button class="iconbtn" data-close aria-label="${tr('act.close')}">${icon('x')}</button>` : ''}
       </div>
       <div class="sheet__body">${body}</div>
       ${foot ? `<div class="sheet__foot">${foot}</div>` : ''}
@@ -1479,7 +1500,7 @@ function confirmSheet({ title, body, danger, onOk }) {
   openSheet({
     title,
     body: `<p style="font-size:14px;color:var(--ink-2);line-height:1.6">${esc(body)}</p>`,
-    foot: `<button class="btn btn--ghost" data-close>取消</button>
+    foot: `<button class="btn btn--ghost" data-close>${tr('act.cancel')}</button>
            <button class="btn btn--primary" data-ok>${esc(danger)}</button>`,
     onMount: (host) => {
       host.querySelector('[data-ok]').onclick = () => { closeSheetNow(); onOk(); };
@@ -1494,7 +1515,7 @@ function openSettle() {
   const scoped = scopedExpenses();
   const moves = settlements(balances(scoped));
   const trip = tripOf(activeTrip);
-  if (!moves.length) { toast('已经两清了', 'check'); return; }
+  if (!moves.length) { toast(tr('settle.already'), 'check'); return; }
 
   let pick = 0;                                   // 选中第几笔建议
   const cur0 = state.display;
@@ -1509,21 +1530,20 @@ function openSettle() {
     </button>`;
 
   openSheet({
-    title: '结算',
+    title: tr('settle.title'),
     body: `
       <div class="alert">${icon('scales')}
-        <span>记下这次转账，差额即抵销。不计为消费${
-          trip ? '，只结算「' + esc(trip.name) + '」' : ''}。</span></div>
+        <span>${tr('settle.intro', trip ? esc(trip.name) : '')}</span></div>
 
       ${moves.length > 1 ? `
         <div class="field" style="margin-top:18px">
-          <span class="label">这次结哪一笔</span>
+          <span class="label">${tr('settle.whichOne')}</span>
           <div class="movelist">${moves.map(row).join('')}</div>
         </div>` : ''}
 
       <div class="field" style="margin-top:18px">
         <label class="label" for="st-amt" id="st-label">
-          ${esc(memberName(moves[0].from))} 转给 ${esc(memberName(moves[0].to))}
+          ${tr('bal.transferTo', esc(memberName(moves[0].from)), esc(memberName(moves[0].to)))}
         </label>
         <div class="amountbox">
           <input id="st-amt" class="num" type="text" inputmode="decimal"
@@ -1532,8 +1552,8 @@ function openSettle() {
             `<option value="${c}" ${c === cur0 ? 'selected' : ''}>${c}</option>`).join('')}</select>
         </div>
       </div>`,
-    foot: `<button class="btn btn--ghost" data-close>取消</button>
-           <button class="btn btn--primary" data-ok>${icon('check')}确认</button>`,
+    foot: `<button class="btn btn--ghost" data-close>${tr('act.cancel')}</button>
+           <button class="btn btn--primary" data-ok>${icon('check')}${tr('act.confirm')}</button>`,
     onMount: (host) => {
       const q = (sel) => host.querySelector(sel);
 
@@ -1542,13 +1562,13 @@ function openSettle() {
         host.querySelectorAll('[data-move]').forEach((x) =>
           x.setAttribute('aria-pressed', String(x === b)));
         const m = moves[pick];
-        q('#st-label').textContent = `${memberName(m.from)} 转给 ${memberName(m.to)}`;
+        q('#st-label').textContent = tr('bal.transferTo', memberName(m.from), memberName(m.to));
         q('#st-amt').value = m.amount.toFixed(CURRENCIES[q('#st-cur').value].dec);
       });
 
       q('[data-ok]').onclick = () => {
         const v = parseFloat(q('#st-amt').value);
-        if (!(v > 0)) { toast('金额需大于 0', 'warning-circle'); return; }
+        if (!(v > 0)) { toast(tr('settle.amountErr'), 'warning-circle'); return; }
         const m = moves[pick];
         state.expenses.push(touch({
           id: uid(), type: 'settle', payerId: m.from, toId: m.to, amount: v,
@@ -1557,7 +1577,7 @@ function openSettle() {
           createdAt: Date.now(),
         }));
         save(); closeSheetNow(); render(); queueSync();
-        toast('已结算', 'check');
+        toast(tr('settle.done'), 'check');
       };
     },
   });
@@ -1572,47 +1592,47 @@ function openTrip(existing) {
     : { id: uid(), name: '', from: todayISO(), to: todayISO(), currency: '' };
 
   openSheet({
-    title: editing ? '编辑项目' : '新建项目',
+    title: editing ? tr('trip.edit') : tr('trip.newFull'),
     body: `
       <div class="alert">${icon('airplane-tilt')}
-        <span>一次旅行、一座城市，都可以单独建一个项目。记账时按日期自动归类。</span></div>
+        <span>${tr('trip.intro')}</span></div>
 
       <div class="field" style="margin-top:18px">
-        <label class="label" for="tp-name">名字</label>
-        <input class="input" id="tp-name" placeholder="例如：東京、清邁、搬家"
+        <label class="label" for="tp-name">${tr('trip.nameLabel')}</label>
+        <input class="input" id="tp-name" placeholder="${tr('trip.namePlaceholder')}"
                value="${esc(t.name)}" maxlength="16" autocomplete="off">
-        <p class="err" id="tp-name-err" hidden>请为项目取一个名称</p>
+        <p class="err" id="tp-name-err" hidden>${tr('trip.nameErr')}</p>
       </div>
 
       <div class="fieldrow">
         <div class="field">
-          <label class="label" for="tp-from">开始</label>
+          <label class="label" for="tp-from">${tr('trip.from')}</label>
           <input class="input" id="tp-from" type="date" value="${t.from || ''}">
         </div>
         <div class="field">
-          <label class="label" for="tp-to">结束</label>
+          <label class="label" for="tp-to">${tr('trip.to')}</label>
           <input class="input" id="tp-to" type="date" value="${t.to || ''}">
         </div>
       </div>
-      <p class="hint" style="margin:7px 0 16px">填了的话，这段日期内的账会自动归入。</p>
+      <p class="hint" style="margin:7px 0 16px">${tr('trip.dateHint')}</p>
 
       <div class="field">
-        <label class="label" for="tp-cur">当地货币</label>
+        <label class="label" for="tp-cur">${tr('trip.curLabel')}</label>
         <div class="selectwrap">
           <select class="select" id="tp-cur">
-            <option value="">不指定</option>
+            <option value="">${tr('trip.curNone')}</option>
             ${Object.keys(CURRENCIES).map((c) => `
               <option value="${c}" ${t.currency === c ? 'selected' : ''}>
-                ${c} · ${CURRENCIES[c].name}
+                ${c} · ${tr('cur.' + c)}
               </option>`).join('')}
           </select>
           ${icon('caret-down')}
         </div>
-        <p class="hint">在这个项目里记账时默认用它。</p>
+        <p class="hint">${tr('trip.curHint')}</p>
       </div>`,
     foot: `
-      ${editing ? `<button class="btn btn--ghost" data-del-trip aria-label="删除项目">${icon('trash')}</button>` : ''}
-      <button class="btn btn--primary" data-ok>${icon('check')}${editing ? '保存' : '创建'}</button>`,
+      ${editing ? `<button class="btn btn--ghost" data-del-trip aria-label="${tr('trip.delOk')}">${icon('trash')}</button>` : ''}
+      <button class="btn btn--primary" data-ok>${icon('check')}${editing ? tr('act.save') : tr('act.create')}</button>`,
     onMount: (host) => {
       const q = (sel) => host.querySelector(sel);
 
@@ -1633,18 +1653,18 @@ function openTrip(existing) {
           activeTrip = rec.id;
         }
         save(); closeSheetNow(); render(); queueSync();
-        toast(editing ? '项目已更新' : `已创建「${name}」`, 'check');
+        toast(editing ? tr('trip.updated') : tr('trip.created', name), 'check');
       };
 
       const del = q('[data-del-trip]');
       if (del) del.onclick = () => {
         const n = liveExpenses().filter((e) => e.tripId === t.id).length;
         confirmSheet({
-          title: `删除「${t.name}」`,
+          title: tr('trip.delTitle', t.name),
           body: n
-            ? `项目将被删除，其中的 ${n} 笔记录不会丢失，会退回「日常」。`
-            : '这个项目还没有记录，删除不会影响任何账目。',
-          danger: '删除项目',
+            ? tr('trip.delBody', n)
+            : tr('trip.delEmpty'),
+          danger: tr('trip.delOk'),
           onOk: () => {
             state.expenses.forEach((e) => {
               if (e.tripId === t.id) { e.tripId = null; touch(e); }
@@ -1652,7 +1672,7 @@ function openTrip(existing) {
             const rec = state.trips.find((x) => x.id === t.id);
             if (rec) { rec.deleted = true; touch(rec); }
             if (activeTrip === t.id) activeTrip = 'all';
-            save(); render(); queueSync(); toast('项目已删除', 'check');
+            save(); render(); queueSync(); toast(tr('trip.deleted'), 'check');
           },
         });
       };
@@ -1681,55 +1701,41 @@ function openAdd(existing) {
     `<option value="${c}">${c}</option>`).join('');
 
   openSheet({
-    title: editing ? '编辑这一笔' : '记一笔',
+    title: editing ? tr('add.editTitle') : tr('add.title'),
     body: `
-      ${editing || !SCAN_AVAILABLE() ? '' : `
-      <div id="scan-slot">
-        <button class="dropzone" id="dz" type="button">
-          ${icon('camera')}
-          <strong>拍小票自动识别</strong>
-          <span>金额、币种、商家、日期一次填好</span>
-        </button>
-        <input type="file" id="file" accept="image/*" class="vh">
-        <div style="display:flex;align-items:center;gap:12px;margin:16px 0 4px">
-          <div style="flex:1;height:1px;background:var(--hair)"></div>
-          <span style="font-size:12px;color:var(--muted-2)">或手动填写</span>
-          <div style="flex:1;height:1px;background:var(--hair)"></div>
-        </div>
-      </div>`}
 
       <form id="f" novalidate>
         <div class="field">
-          <label class="label" for="f-amt">金额</label>
+          <label class="label" for="f-amt">${tr('add.amount')}</label>
           <div class="amountbox">
             <input id="f-amt" class="num" type="text" inputmode="decimal" placeholder="0.00"
                    value="${draft.amount || ''}" aria-describedby="f-conv">
-            <select id="f-cur" aria-label="币种">${curOptions}</select>
+            <select id="f-cur" aria-label="${tr('set.currency')}">${curOptions}</select>
           </div>
           <div class="converted" id="f-conv"></div>
-          <p class="err" id="f-amt-err" hidden>请填写大于 0 的金额</p>
+          <p class="err" id="f-amt-err" hidden>${tr('add.amountErr')}</p>
         </div>
 
         <div class="field">
-          <label class="label" for="f-merchant">商家</label>
-          <input class="input" id="f-merchant" placeholder="例如：翠華餐廳"
+          <label class="label" for="f-merchant">${tr('add.merchant')}</label>
+          <input class="input" id="f-merchant" placeholder="${tr('add.merchantPlaceholder')}"
                  value="${esc(draft.merchant)}" maxlength="40">
         </div>
 
         <div class="field">
-          <span class="label">分类</span>
+          <span class="label">${tr('add.cat')}</span>
           <div class="catgrid" id="f-cats">
             ${CATS.map((c) => `
               <button type="button" class="catbtn" data-cat="${c.id}"
                       aria-pressed="${draft.cat === c.id}">
-                ${icon(c.icon)}<span>${c.label}</span>
+                ${icon(c.icon)}<span>${tr('cat.' + c.id)}</span>
               </button>`).join('')}
           </div>
-          <p class="err" id="f-cat-err" hidden>请选择一个分类</p>
+          <p class="err" id="f-cat-err" hidden>${tr('add.catErr')}</p>
         </div>
 
         <div class="field">
-          <span class="label">谁付的</span>
+          <span class="label">${tr('add.payer')}</span>
           <div class="pick pick--wrap" id="f-payer">
             ${liveMembers().map((m) => `
               <button type="button" class="pickbtn" data-payer="${m.id}"
@@ -1741,9 +1747,9 @@ function openAdd(existing) {
 
         <div class="field">
           <div style="display:flex;align-items:baseline;gap:10px">
-            <span class="label" style="margin-right:auto">谁分摊</span>
-            <button type="button" class="linkbtn" id="f-all">全选</button>
-            <button type="button" class="linkbtn" id="f-only">只有付款人</button>
+            <span class="label" style="margin-right:auto">${tr('add.split')}</span>
+            <button type="button" class="linkbtn" id="f-all">${tr('add.selectAll')}</button>
+            <button type="button" class="linkbtn" id="f-only">${tr('add.onlyPayer')}</button>
           </div>
           <div class="pick pick--wrap" id="f-parts">
             ${liveMembers().map((m) => `
@@ -1753,14 +1759,14 @@ function openAdd(existing) {
               </button>`).join('')}
           </div>
           <p class="hint" id="f-split-hint"></p>
-          <p class="err" id="f-part-err" hidden>至少选一个分摊人</p>
+          <p class="err" id="f-part-err" hidden>${tr('add.splitErr')}</p>
         </div>
 
         <div class="field">
-          <label class="label" for="f-trip">项目</label>
+          <label class="label" for="f-trip">${tr('add.trip')}</label>
           <div class="selectwrap">
             <select class="select" id="f-trip">
-              <option value="">日常</option>
+              <option value="">${tr('trip.daily')}</option>
               ${liveTrips().map((t) => `
                 <option value="${t.id}" ${draft.tripId === t.id ? 'selected' : ''}>
                   ${esc(t.name)}${tripRange(t) ? ' · ' + tripRange(t) : ''}
@@ -1773,18 +1779,18 @@ function openAdd(existing) {
 
         <div class="fieldrow">
           <div class="field">
-            <label class="label" for="f-date">日期</label>
+            <label class="label" for="f-date">${tr('add.date')}</label>
             <input class="input" id="f-date" type="date" value="${draft.date}" max="${todayISO()}">
           </div>
           <div class="field">
-            <label class="label" for="f-note">备注</label>
-            <input class="input" id="f-note" placeholder="可留空" value="${esc(draft.note)}" maxlength="30">
+            <label class="label" for="f-note">${tr('add.note')}</label>
+            <input class="input" id="f-note" placeholder="${tr('add.notePlaceholder')}" value="${esc(draft.note)}" maxlength="30">
           </div>
         </div>
       </form>`,
     foot: `
-      ${editing ? `<button class="btn btn--ghost" data-del aria-label="删除这一笔">${icon('trash')}</button>` : ''}
-      <button class="btn btn--primary" data-ok>${icon('check')}${editing ? '保存' : '记下'}</button>`,
+      ${editing ? `<button class="btn btn--ghost" data-del aria-label="${tr('add.delOne')}">${icon('trash')}</button>` : ''}
+      <button class="btn btn--primary" data-ok>${icon('check')}${editing ? tr('act.save') : tr('act.record')}</button>`,
     onMount: (host) => wireAddForm(host, draft, editing),
   });
 }
@@ -1808,9 +1814,9 @@ function wireAddForm(host, draft, editing) {
     const n = parts.length;
     q('#f-split-hint').textContent =
       n === 0 ? '' :
-      n === 1 && parts[0] === draft.payerId ? `${payer} 自己承担，不用别人补。` :
-      n === 1 ? `全额记在 ${memberName(parts[0])} 头上。` :
-      `${payer} 垫付，${n} 个人各摊一份。`;
+      n === 1 && parts[0] === draft.payerId ? tr('add.hintSelf', payer) :
+      n === 1 ? tr('add.hintOnOne', memberName(parts[0])) :
+      tr('add.hintEven', payer, n);
     q('#f-part-err').hidden = n > 0;
   };
 
@@ -1818,8 +1824,8 @@ function wireAddForm(host, draft, editing) {
   const syncTripHint = () => {
     const t = tripOf(tripSel.value);
     q('#f-trip-hint').textContent = t
-      ? `计入「${t.name}」。`
-      : '不归入项目。';
+      ? tr('add.inTrip', t.name)
+      : tr('add.noTrip');
   };
 
   /* 改日期时，如果这天落在某个项目的区间里就自动归过去 */
@@ -1829,7 +1835,7 @@ function wireAddForm(host, draft, editing) {
     if (hit && tripSel.value !== hit.id) {
       tripSel.value = hit.id;
       syncTripHint();
-      toast(`已按日期归入「${hit.name}」`, 'airplane-tilt');
+      toast(tr('trip.autoFiled', hit.name), 'airplane-tilt');
     }
   };
   tripSel.onchange = syncTripHint;
@@ -1869,23 +1875,6 @@ function wireAddForm(host, draft, editing) {
     paintParts(); syncSplitHint();
   };
 
-  /* --- 拍照识别 --- */
-  const dz = q('#dz'), file = q('#file');
-  if (dz) {
-    dz.onclick = () => file.click();
-    dz.ondragover = (e) => { e.preventDefault(); dz.classList.add('is-over'); };
-    dz.ondragleave = () => dz.classList.remove('is-over');
-    dz.ondrop = (e) => {
-      e.preventDefault(); dz.classList.remove('is-over');
-      const f = e.dataTransfer.files?.[0];
-      if (f) handleScan(f, host, draft, syncConverted, syncSplitHint);
-    };
-    file.onchange = () => {
-      const f = file.files?.[0];
-      if (f) handleScan(f, host, draft, syncConverted, syncSplitHint);
-    };
-  }
-
   /* --- 保存 / 删除 --- */
   host.querySelector('[data-ok]').onclick = () => {
     const v = parseFloat(q('#f-amt').value);
@@ -1918,18 +1907,19 @@ function wireAddForm(host, draft, editing) {
       state.expenses.push(rec);
     }
     save(); closeSheetNow(); render(); queueSync();
-    toast(editing ? '已保存' : `记下 ${fmt(convert(rec.amount, rec.currency, state.display), state.display)}`, 'check');
+    toast(editing ? tr('add.saved')
+      : tr('add.recorded', fmt(convert(rec.amount, rec.currency, state.display), state.display)), 'check');
   };
 
   const del = host.querySelector('[data-del]');
   if (del) del.onclick = () => confirmSheet({
-    title: '删除这一笔',
-    body: '删除后差额会重新计算，且无法恢复。',
-    danger: '删除',
+    title: tr('add.delTitle'),
+    body: tr('add.delBody'),
+    danger: tr('act.delete'),
     onOk: () => {
       const rec = state.expenses.find((e) => e.id === draft.id);
       if (rec) { rec.deleted = true; touch(rec); }
-      save(); render(); queueSync(); toast('已删除', 'check');
+      save(); render(); queueSync(); toast(tr('add.deleted'), 'check');
     },
   });
 }
@@ -1937,115 +1927,16 @@ function wireAddForm(host, draft, editing) {
 function openSettleDetail(e) {
   const from = memberName(e.payerId), to = memberName(e.toId);
   confirmSheet({
-    title: '结算记录',
-    body: `${e.date}，${from} 转给 ${to} ${fmt(e.amount, e.currency)}。删除后差额将恢复。`,
-    danger: '删除这条记录',
+    title: tr('settle.recTitle'),
+    body: tr('settle.recBody', e.date, from, to, fmt(e.amount, e.currency)),
+    danger: tr('settle.recDel'),
     onOk: () => {
       const rec = state.expenses.find((x) => x.id === e.id);
       if (rec) { rec.deleted = true; touch(rec); }
-      save(); render(); queueSync(); toast('已删除', 'check');
+      save(); render(); queueSync(); toast(tr('add.deleted'), 'check');
     },
   });
 }
-
-/* ==========================================================================
-   小票识别
-   ========================================================================== */
-async function compress(file, max = 1400, quality = 0.82) {
-  const bmp = await createImageBitmap(file);
-  const scale = Math.min(1, max / Math.max(bmp.width, bmp.height));
-  const w = Math.round(bmp.width * scale), h = Math.round(bmp.height * scale);
-  const cv = document.createElement('canvas');
-  cv.width = w; cv.height = h;
-  cv.getContext('2d').drawImage(bmp, 0, 0, w, h);
-  bmp.close?.();
-  return cv.toDataURL('image/jpeg', quality);
-}
-
-async function handleScan(file, host, draft, syncConverted, syncSplitHint) {
-  const slot = host.querySelector('#scan-slot');
-  if (!slot) return;
-
-  let dataUrl;
-  try {
-    dataUrl = await compress(file);
-  } catch {
-    toast('无法读取这个文件，请换一张图片', 'warning-circle');
-    return;
-  }
-
-  slot.innerHTML = `
-    <div class="preview">
-      <img src="${dataUrl}" alt="上传的小票">
-      <button class="preview__x" type="button" id="scan-x" aria-label="移除照片">${icon('x')}</button>
-    </div>
-    <div class="scanning">${icon('arrows-clockwise')}<span>正在识别这张小票…</span></div>
-    <div class="skelform">
-      <div><div class="skel" style="height:11px;width:52px"></div><div class="skel" style="height:38px"></div></div>
-      <div><div class="skel" style="height:11px;width:76px"></div><div class="skel" style="height:38px"></div></div>
-    </div>`;
-  const resetSlot = () => { slot.innerHTML = ''; openAdd(); };
-  host.querySelector('#scan-x').onclick = resetSlot;
-
-  let out;
-  try {
-    const res = await fetch(scanUrl(), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: dataUrl, categories: CATS.map((c) => ({ id: c.id, label: c.label })) }),
-    });
-    out = await res.json();
-    if (!res.ok) throw new Error(out.error || `识别服务返回 ${res.status}`);
-  } catch (err) {
-    slot.innerHTML = `
-      <div class="preview">
-        <img src="${dataUrl}" alt="上传的小票">
-        <button class="preview__x" type="button" id="scan-x2" aria-label="移除照片">${icon('x')}</button>
-      </div>
-      <div class="alert" style="margin-top:12px">${icon('warning-circle')}
-        <span>识别未成功：${esc(err.message)}<br>手动填写同样可以。</span></div>`;
-    host.querySelector('#scan-x2').onclick = resetSlot;
-    return;
-  }
-
-  /* 回填表单 */
-  const q = (s) => host.querySelector(s);
-  if (out.amount > 0) q('#f-amt').value = String(out.amount);
-  if (out.currency && CURRENCIES[out.currency]) {
-    q('#f-cur').value = out.currency;
-    draft.currency = out.currency;
-  }
-  if (out.merchant) q('#f-merchant').value = out.merchant.slice(0, 40);
-  if (out.note) q('#f-note').value = out.note.slice(0, 30);
-  if (out.date && /^\d{4}-\d{2}-\d{2}$/.test(out.date) && out.date <= todayISO()) {
-    q('#f-date').value = out.date;
-  }
-  const cat = CATS.find((c) => c.id === out.category);
-  if (cat) {
-    draft.cat = cat.id;
-    host.querySelectorAll('#f-cats [data-cat]').forEach((b) =>
-      b.setAttribute('aria-pressed', String(b.dataset.cat === cat.id)));
-    q('#f-cat-err').hidden = true;
-  }
-  syncConverted(); syncSplitHint();
-
-  const conf = out.confidence === 'low' ? '有几项不太确定，保存前核对一下'
-             : out.mock ? '演示数据，配上 API key 后会真实识别'
-             : '识别完成，确认后保存';
-  slot.innerHTML = `
-    <div class="preview">
-      <img src="${dataUrl}" alt="上传的小票">
-      <button class="preview__x" type="button" id="scan-x3" aria-label="移除照片">${icon('x')}</button>
-    </div>
-    <div class="scanning" style="background:var(--surface-2);color:var(--ink-2)">
-      ${icon(out.confidence === 'low' || out.mock ? 'warning-circle' : 'sparkle')}
-      <span>${esc(conf)}</span>
-    </div>`;
-  host.querySelector('#scan-x3').onclick = resetSlot;
-  q('#f-amt').focus();
-  q('#f-amt').select?.();
-}
-
 
 /* ==========================================================================
    同步
@@ -2141,16 +2032,16 @@ async function syncNow({ manual = false } = {}) {
     if (changed || manual) render();
     if (schemaOutdated && !schemaWarned) {
       schemaWarned = true;
-      toast('数据库还是两人版，请重跑一次 schema.sql', 'warning-circle');
+      toast(tr('sync.schemaOld'), 'warning-circle');
     } else if (manual) {
-      toast(changed ? '同步完成' : '已是最新', 'check');
+      toast(changed ? tr('sync.done') : tr('sync.upToDate'), 'check');
     }
   } catch (err) {
     const offline = !navigator.onLine || err.message === 'Failed to fetch';
     syncStatus = offline ? 'offline' : 'error';
-    syncError = err.pgcode === 'P0002' ? '账本码无效，可能已被移除' : err.message;
+    syncError = err.pgcode === 'P0002' ? tr('sync.codeInvalid') : err.message;
     paintSync();
-    if (manual) toast(offline ? '连接不上，恢复网络后自动重试' : `同步失败：${syncError}`, 'warning-circle');
+    if (manual) toast(offline ? tr('sync.offline') : tr('sync.failed', syncError), 'warning-circle');
     console.warn('[sync]', err);
   }
 }
@@ -2168,9 +2059,9 @@ async function syncNow({ manual = false } = {}) {
    ========================================================================== */
 function readBackup(raw) {
   let data;
-  try { data = JSON.parse(raw); } catch { throw new Error('这个文件不是账本备份'); }
+  try { data = JSON.parse(raw); } catch { throw new Error(tr('imp.notBackup')); }
   if (!data || !Array.isArray(data.members) || !Array.isArray(data.expenses)) {
-    throw new Error('这个文件不是账本备份');
+    throw new Error(tr('imp.notBackup'));
   }
   return data;
 }
@@ -2352,13 +2243,13 @@ function disconnectSync() {
 
 /* ---------- 状态指示 ---------- */
 function syncLabel() {
-  if (!isSynced()) return '仅本机';
-  if (syncStatus === 'busy') return '同步中';
-  if (syncStatus === 'offline') return '离线，改动已保存';
-  if (syncStatus === 'error') return '同步出错';
-  if (!syncState.lastOk) return '待同步';
+  if (!isSynced()) return tr('st.local');
+  if (syncStatus === 'busy') return tr('st.busy');
+  if (syncStatus === 'offline') return tr('st.offline');
+  if (syncStatus === 'error') return tr('st.error');
+  if (!syncState.lastOk) return tr('st.pending');
   const mins = Math.floor((Date.now() - syncState.lastOk) / 60000);
-  return mins < 1 ? '刚刚同步' : mins < 60 ? `${mins} 分钟前同步` : '较久未同步';
+  return mins < 1 ? tr('st.justNow') : mins < 60 ? tr('st.minsAgo', mins) : tr('st.longAgo');
 }
 
 function paintSync() {
@@ -2401,7 +2292,7 @@ function registerSW() {
         sw.addEventListener('statechange', () => {
           // 已经有旧版在跑，说明这是一次更新而不是首次安装
           if (sw.state === 'installed' && navigator.serviceWorker.controller) {
-            toast('新版本已就绪，重开生效', 'arrows-clockwise');
+            toast(tr('sw.updated'), 'arrows-clockwise');
           }
         });
       });

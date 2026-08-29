@@ -15,26 +15,6 @@ export const SUPABASE_KEY = 'sb_publishable_MrVpgQISk_zqvuryRnGcqQ_gzm8QjOY';
 export const SYNC_AVAILABLE = Boolean(SUPABASE_URL && SUPABASE_KEY);
 
 /* --------------------------------------------------------------------------
-   小票识别
-
-   识别必须经过一个能藏 Anthropic API key 的后端，key 绝不能进浏览器。
-
-   · 本机跑 `python3 server.py` 时，自动用它自带的 /api/scan，这里不用填
-   · 部署到 GitHub Pages 之后没有后端，把 Cloudflare Worker 的地址填在下面
-   · 留空的话，界面上「拍小票自动识别」会自己隐藏，手动记账不受影响
-   -------------------------------------------------------------------------- */
-export const SCAN_ENDPOINT = '';
-
-const LOCAL_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
-
-/** 本机开发走 Python 服务，线上走 Worker */
-export function scanUrl() {
-  if (LOCAL_HOSTS.includes(location.hostname)) return '/api/scan';
-  return SCAN_ENDPOINT || '';
-}
-export const SCAN_AVAILABLE = () => Boolean(scanUrl());
-
-/* --------------------------------------------------------------------------
    汇率：欧洲央行数据，frankfurter.dev 允许浏览器直连（CORS 是 *），
    所以不需要任何后端代理，静态托管也能拿到实时汇率。
    -------------------------------------------------------------------------- */

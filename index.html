@@ -5,14 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#EEF0ED" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0D0F11" media="(prefers-color-scheme: dark)">
-<meta name="description" content="几个人一起记账：多币种按实时汇率换算、消费分类、拍照识别小票，随时看清谁该转给谁多少。">
+<meta name="description" content="几个人一起记账：多币种按实时汇率换算、按分类和行程拆开看，随时知道谁该转给谁多少。">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>WeTab · 一起记账</title>
 <link rel="manifest" href="./manifest.webmanifest">
-<link rel="icon" href="./favicon.svg" type="image/svg+xml">
-<link rel="icon" href="./icon-192.png" type="image/png"><!-- 不认 SVG 的浏览器 -->
-<link rel="apple-touch-icon" href="./apple-touch-icon.png">
+<!-- ?v= 是给浏览器看的：favicon 一旦拿到过就长期不再请求，
+     换了图标不改 URL 的话，旧的能挂在标签页上很久。 -->
+<link rel="icon" href="./favicon.svg?v=2" type="image/svg+xml">
+<link rel="icon" href="./icon-192.png?v=2" type="image/png"><!-- 不认 SVG 的浏览器 -->
+<link rel="apple-touch-icon" href="./apple-touch-icon.png?v=2">
 <link rel="stylesheet" href="./styles.css">
 </head>
 <body>

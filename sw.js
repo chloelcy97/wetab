@@ -11,16 +11,20 @@
    不缓存的东西：
      · Supabase（账本同步）—— 必须拿最新的，拿旧的会覆盖对方的改动
      · frankfurter（汇率）  —— app 自己有当天缓存和离线兜底汇率
-     · /api/scan（小票识别）—— 每次都是新图
    ========================================================================== */
 
-const CACHE = 'wetab-shell';
+/* 换了名字，旧缓存会在 activate 时被清掉。
+   平时不需要动它 —— stale-while-revalidate 自己会更新。
+   只有「必须让所有人立刻拿到新外壳」时才改，比如换图标：
+   新图标的地址写在 index.html 里，而 index.html 自己还在旧缓存中，不换名就绕不出去。 */
+const CACHE = 'wetab-shell-v2';
 
 /* 相对路径：GitHub Pages 上跑在 /wetab/ 子目录，本机跑在根目录，两边都要对 */
 const SHELL = [
   './',
   './index.html',
   './app.js',
+  './i18n.js',
   './styles.css',
   './config.js',
   './sprite.svg',
@@ -55,7 +59,6 @@ self.addEventListener('fetch', (e) => {
 
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;   // Supabase / 汇率，一律直连
-  if (url.pathname.includes('/api/')) return;        // 小票识别
 
   e.respondWith(
     caches.open(CACHE).then(async (cache) => {
