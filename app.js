@@ -1467,8 +1467,17 @@ function wireView() {
 let toastTimer;
 function toast(msg, ic = 'check') {
   clearTimeout(toastTimer);
-  $('#toast-host').innerHTML = `<div class="toast">${icon(ic)}<span>${esc(msg)}</span></div>`;
-  toastTimer = setTimeout(() => ($('#toast-host').innerHTML = ''), 2600);
+  const host = $('#toast-host');
+  host.innerHTML = `<div class="toast">${icon(ic)}<span>${esc(msg)}</span></div>`;
+  const el = host.firstElementChild;
+  toastTimer = setTimeout(() => {
+    if (host.firstElementChild !== el) return;    // 期间又弹了一条，交给它自己收场
+    if (reduceMotion()) { host.innerHTML = ''; return; }
+    el.classList.add('is-closing');
+    const done = () => { if (host.firstElementChild === el) host.innerHTML = ''; };
+    el.addEventListener('animationend', done, { once: true });
+    setTimeout(done, exitMs(el));
+  }, 2600);
 }
 
 /* ==========================================================================
@@ -1476,9 +1485,20 @@ function toast(msg, ic = 'check') {
    ========================================================================== */
 let closeSheet = null;
 let lockedAt = 0;
+/* 每开一次加一。关闭带动画，收尾是异步的 —— 期间可能又开了新抽屉，
+   那时旧的收尾必须认出「已经不是我那一代了」，否则会把新抽屉一起清掉。 */
+let sheetGen = 0;
+
+/** 退场动画实际要跑多久，加一点余量。读算好的样式，免得和 CSS 里的时长各说各话。 */
+function exitMs(el) {
+  return (parseFloat(getComputedStyle(el).animationDuration) || 0.26) * 1000 + 40;
+}
 
 /* iOS 上 overflow:hidden 拦不住背景滚动，得把 body 定住再还原位置 */
 function lockScroll() {
+  // 已经锁着就别再记一次：这时 body 是 fixed，window.scrollY 是 0，
+  // 记下去就把真正的位置冲掉了。关抽屉带动画之后，解锁会晚于下一次上锁，会撞上。
+  if (document.body.classList.contains('is-locked')) return;
   lockedAt = window.scrollY || 0;
   document.body.style.top = `-${lockedAt}px`;
   document.body.classList.add('is-locked');
@@ -1490,7 +1510,8 @@ function unlockScroll() {
 }
 
 function openSheet({ title, body, foot, onMount, dismissible = true }) {
-  closeSheetNow();
+  closeSheetNow({ instant: true });   // 让位给新的，DOM 马上就要被换掉，没必要演退场
+  const gen = ++sheetGen;
   const host = $('#overlay');
   host.innerHTML = `
     <div class="scrim" ${dismissible ? 'data-close' : ''}></div>
@@ -1503,20 +1524,36 @@ function openSheet({ title, body, foot, onMount, dismissible = true }) {
       ${foot ? `<div class="sheet__foot">${foot}</div>` : ''}
     </div>`;
   lockScroll();
-  host.querySelectorAll('[data-close]').forEach((el) => el.onclick = closeSheetNow);
+  // 不要直接把 closeSheetNow 当处理器：那样会把 Event 当成选项对象传进去
+  host.querySelectorAll('[data-close]').forEach((el) => el.onclick = () => closeSheetNow());
 
   const onKey = (ev) => { if (ev.key === 'Escape' && dismissible) closeSheetNow(); };
   document.addEventListener('keydown', onKey);
-  closeSheet = () => {
+  closeSheet = ({ instant = false } = {}) => {
     document.removeEventListener('keydown', onKey);
-    host.innerHTML = '';
-    unlockScroll();
     closeSheet = null;
+
+    let cleaned = false;
+    const done = () => {
+      if (cleaned || gen !== sheetGen) return;   // 期间开了新的，那份 DOM 不归我清
+      cleaned = true;
+      host.innerHTML = '';
+      unlockScroll();
+    };
+    const sheet = host.querySelector('.sheet');
+    if (instant || reduceMotion() || !sheet) { done(); return; }
+
+    host.querySelector('.scrim')?.classList.add('is-closing');
+    sheet.classList.add('is-closing');
+    // 时长从算好的样式里读，不写死：这样改 --t-base 不用回来同步一个数字。
+    // animationend 优先，但不能只靠它 —— 标签页在后台、或元素被提前换掉时它不会来。
+    sheet.addEventListener('animationend', done, { once: true });
+    setTimeout(done, exitMs(sheet));
   };
   onMount?.(host);
   host.querySelector('input, select, button:not([data-close])')?.focus?.();
 }
-function closeSheetNow() { closeSheet?.(); }
+function closeSheetNow(opts) { closeSheet?.(opts); }
 
 function confirmSheet({ title, body, danger, onOk }) {
   openSheet({
