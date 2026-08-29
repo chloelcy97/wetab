@@ -481,8 +481,7 @@ function viewLedger() {
     ? `<div class="balance__label">${icon('hand-coins')}
          <span>${tr('bal.transferTo', esc(memberName(moves[0].from)), esc(memberName(moves[0].to)))}</span></div>
        <div class="balance__amount num">${fmt(moves[0].amount, state.display, { sym: false })}
-         <span class="cur">${state.display}</span></div>
-       <p class="balance__sub">${tr('bal.afterClear')}</p>`
+         <span class="cur">${state.display}</span></div>`
     : `<div class="balance__label">${icon('hand-coins')}<span>${tr('bal.nMoves', moves.length)}</span></div>
        <div class="moves">
          ${moves.map((m) => `
@@ -520,7 +519,7 @@ function viewLedger() {
         </div>
         <p class="rate-note">
           ${icon(rates.stale || rates.error ? 'warning-circle' : 'arrows-clockwise')}
-          <span>${rates.stale || rates.error
+          <span class="${rates.stale || rates.error ? '' : 'num'}">${rates.stale || rates.error
             ? tr('rates.offline')
             : tr('rates.ecb', rates.date || tr('rates.today'))}</span>
           <button data-refresh-rates>${tr('act.update')}</button>
@@ -596,7 +595,7 @@ function dayGroup(g) {
   return `
     <section class="daygroup">
       <div class="daygroup__head">
-        <span>${dayLabel(g.date)}</span>
+        <span class="num">${dayLabel(g.date)}</span>
         <span class="num">${fmt(daySum, state.display)}</span>
       </div>
       <div class="rows">${g.items.map(rowHTML).join('')}</div>
@@ -605,6 +604,14 @@ function dayGroup(g) {
 
 /* 进场动画只跑首屏那一次；之后切币种、增删记录都不再重播 */
 let animateRows = true;
+
+/* 量一次 chips 那行能不能横滑，能滑才挂右边那道渐隐。
+   每次重绘调用一次；转屏或窗口变宽变窄时也要重量，所以另外挂一个 resize。 */
+function markScrollable() {
+  const chips = document.querySelector('.chips');
+  if (chips) chips.classList.toggle('is-scrollable', chips.scrollWidth > chips.clientWidth + 1);
+}
+addEventListener('resize', markScrollable);
 
 function rowHTML(e, i = 0) {
   const delay = (animateRows && !reduceMotion())
@@ -675,7 +682,7 @@ function viewStats() {
       <h2>${tr('stats.title')}</h2>
       <div class="monthnav">
         <button data-month="-1" aria-label="${tr('stats.prevMonth')}">${icon('caret-left')}</button>
-        <span class="monthnav__label">${tr('stats.month', y, m)}</span>
+        <span class="monthnav__label num">${tr('stats.month', y, m)}</span>
         <button data-month="1" aria-label="${tr('stats.nextMonth')}" ${atCurrent ? 'disabled' : ''}>${icon('caret-right')}</button>
       </div>
     </div>`;
@@ -743,7 +750,7 @@ function tripsSection() {
         <button class="tripcard" data-open-trip="${s.trip.id}">
           <div class="tripcard__top">
             <span class="tripcard__name">${icon('airplane-tilt')}${esc(s.trip.name)}</span>
-            <span class="tripcard__meta">${tripRange(s.trip) || tr('trip.noDate')}${
+            <span class="tripcard__meta num">${tripRange(s.trip) || tr('trip.noDate')}${
               s.days ? ' · ' + tr('trip.days', s.days) : ''}</span>
           </div>
           <div class="tripcard__amt num">${fmt(s.total, state.display, { sym: false })}
@@ -899,7 +906,7 @@ function viewSettings() {
           <button class="listrow" data-edit-trip="${t.id}">
             ${icon('airplane-tilt')}
             <span class="listrow__label">${esc(t.name)}</span>
-            <span class="listrow__value">${tr('entries',
+            <span class="listrow__value num">${tr('entries',
               liveExpenses().filter((e) => e.tripId === t.id && e.type !== 'settle').length)}</span>
             ${icon('caret-right')}
           </button>`).join('')}
@@ -927,7 +934,7 @@ function viewSettings() {
       <button class="listrow" data-export>
         ${icon('note-pencil')}
         <span class="listrow__label">${tr('set.export')}</span>
-        <span class="listrow__value">${tr('entries', liveExpenses().length)}</span>
+        <span class="listrow__value num">${tr('entries', liveExpenses().length)}</span>
       </button>
       <button class="listrow" data-import>
         ${icon('arrows-clockwise')}
@@ -1337,6 +1344,18 @@ function wireView() {
 
   document.querySelectorAll('[data-scope]').forEach((el) =>
     el.onclick = () => { activeTrip = el.dataset.scope; animateRows = true; render(); });
+
+  /* 项目那一行横着能滑，但滑到看不见的部分没有任何提示。
+     两端各加一道渐隐，只在那一侧真的还有内容时才出现 ——
+     常见做法是两边一直挂着遮罩，但那样滑到底了最后一个 chip 还是灰的。 */
+  /* 项目那一行横着能滑，但看不见的部分之前没有任何提示，右边加一道渐隐。
+
+     只量一次「内容有没有超出容器」，不挂 scroll 监听也不用 IntersectionObserver：
+     那两条路要靠滚动过程中的事件才能把两端分别点亮，而这里真正要回答的问题只有
+     「这行到底能不能滑」—— 一次测量就够了。代价是滑到最右时那道渐隐还在，
+     换来的是没有任何可能不触发的运行时依赖。项目只有一两个、这行根本不用滑的时候，
+     渐隐不会出现，也就不会假装「右边还有」。 */
+  markScrollable();
   document.querySelectorAll('[data-new-trip]').forEach((el) =>
     el.onclick = () => openTrip());
   document.querySelectorAll('[data-edit-trip]').forEach((el) =>

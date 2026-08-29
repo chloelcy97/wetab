@@ -486,7 +486,6 @@ img { max-width: 100%; display: block; }
   letter-spacing: 0;
 }
 .balance--settled .balance__amount { color: var(--ink); }
-.balance__sub { margin-top: 7px; font-size: 12.5px; color: var(--muted); }
 
 /* ==========================================================================
    项目切换 chips
@@ -500,6 +499,12 @@ img { max-width: 100%; display: block; }
   margin: 0 -16px;
   padding-inline: 16px;
   scroll-snap-type: x proximity;
+}
+/* 能滑才渐隐。22px 里有 16px 是容器自己的内边距，
+   所以就算滑到最右，盖住最后一个 chip 的也只有 6px。 */
+.chips.is-scrollable {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent 100%);
+  mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent 100%);
 }
 .chips::-webkit-scrollbar { display: none; }
 .chip {
