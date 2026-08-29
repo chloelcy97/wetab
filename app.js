@@ -906,15 +906,6 @@ function viewSettings() {
       </div>` : `
       <p class="footnote" style="padding-top:0">${tr('trip.beforeTrip')}</p>`}
 
-    <div class="sec"><h2>${tr('set.currency')}</h2></div>
-    <div class="seg" role="tablist" aria-label="${tr('set.defaultCur')}">
-      ${DISPLAY.map((c) => `
-        <button class="seg__btn" role="tab" data-cur="${c}" aria-selected="${state.display === c}">
-          ${c} · ${tr('cur.' + c)}
-        </button>`).join('')}
-    </div>
-    <p class="footnote">${tr('set.thisDeviceOnly')}</p>
-
     ${SYNC_AVAILABLE ? syncPanel() : ''}
 
     ${SUPPORT_URL ? `
@@ -1162,30 +1153,42 @@ function setLook(patch) {
 }
 
 /* ---------- 设置页的外观面板 ----------
-   语言并在这里：和配色、明暗一样，都是只影响这台设备的显示偏好。 */
+   四项都是「只影响这台设备的显示偏好」，所以合成一张卡、一行一项、一句脚注。
+   原来是「胶囊 + 四张带边框的配色卡 + 又一个胶囊」，三种形状堆在一起，
+   在设置页里比真正有功能的「项目」还抢眼，而且脚注和币种那节重复了一遍。 */
 function lookPanel() {
+  const seg = (attr, items, current, label) => `
+    <div class="seg seg--sm" role="tablist" aria-label="${label}">
+      ${items.map((it) => `
+        <button class="seg__btn" role="tab" ${attr}="${it.id}"
+          aria-selected="${it.id === current}">${it.label}</button>`).join('')}
+    </div>`;
+
+  const row = (label, control) => `
+    <div class="optrow"><span class="optrow__label">${label}</span>${control}</div>`;
+
   return `
     <div class="sec"><h2>${tr('set.appearance')}</h2></div>
-    <div class="seg" role="tablist" aria-label="${tr('set.language')}">
-      ${LANGS.map((l) => `
-        <button class="seg__btn" role="tab" data-lang="${l.id}"
-          aria-selected="${getLang() === l.id}">${l.label}</button>`).join('')}
-    </div>
-    <div class="swatches" role="radiogroup" aria-label="${tr('set.palette')}" style="margin-top:10px">
-      ${PALETTES.map((p) => `
-        <button class="swatch" role="radio" data-palette="${p.id}"
-                aria-checked="${look.palette === p.id}">
-          <span class="swatch__chip">
-            ${p.swatch.map((c) => `<i style="background:${c}"></i>`).join('')}
-          </span>
-          <span class="swatch__name">${tr('pal.' + p.id)}</span>
-        </button>`).join('')}
-    </div>
+    <div class="card">
+      ${row(tr('set.language'),
+            seg('data-lang', LANGS, getLang(), tr('set.language')))}
 
-    <div class="seg" role="tablist" aria-label="${tr('set.mode')}">
-      ${MODES.map((m) => `
-        <button class="seg__btn" role="tab" data-mode="${m.id}"
-          aria-selected="${look.mode === m.id}">${tr('mode.' + m.id)}</button>`).join('')}
+      ${row(tr('set.palette'), `
+        <div class="dots" role="radiogroup" aria-label="${tr('set.palette')}">
+          ${PALETTES.map((p) => `
+            <button class="dot" role="radio" data-palette="${p.id}"
+                    aria-checked="${look.palette === p.id}"
+                    aria-label="${tr('pal.' + p.id)}"
+                    style="background:${p.swatch[0]}"></button>`).join('')}
+        </div>`)}
+
+      ${row(tr('set.mode'),
+            seg('data-mode', MODES.map((m) => ({ id: m.id, label: tr('mode.' + m.id) })),
+                look.mode, tr('set.mode')))}
+
+      ${row(tr('set.amounts'),
+            seg('data-cur', DISPLAY.map((c) => ({ id: c, label: c })),
+                state.display, tr('set.defaultCur')))}
     </div>
     <p class="footnote">${tr('set.thisDeviceOnly')}</p>`;
 }

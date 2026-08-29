@@ -152,6 +152,7 @@ const S = {
     'set.storedLocally': '账目存在本机浏览器里。',
     'set.appearance': '外观',
     'set.palette': '配色',
+    'set.amounts': '金额',
     'set.mode': '明暗',
     'set.language': '语言',
 
@@ -160,7 +161,7 @@ const S = {
     'pal.celadon': '青瓷',
     'pal.indigo': '黛紫',
     'pal.mist': '雾灰',
-    'mode.auto': '跟随系统',
+    'mode.auto': '自动',
     'mode.light': '浅色',
     'mode.dark': '深色',
 
@@ -453,6 +454,7 @@ const S = {
     'set.storedLocally': 'Entries live in this browser.',
     'set.appearance': 'Appearance',
     'set.palette': 'Palette',
+    'set.amounts': 'Amounts',
     'set.mode': 'Light / dark',
     'set.language': 'Language',
 

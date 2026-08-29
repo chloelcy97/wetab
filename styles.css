@@ -1391,45 +1391,49 @@ button.listrow:hover { background: var(--surface-2); }
 /* ==========================================================================
    配色选择
    ========================================================================== */
-.swatches {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-  margin-bottom: 14px;
-}
-.swatch {
-  display: grid;
-  justify-items: center;
-  gap: 7px;
-  padding: 14px 6px 12px;
-  border-radius: var(--r-tile);
-  background: var(--surface);
-  border: 1px solid var(--hair);
-  transition: border-color .16s var(--ease), transform .12s var(--ease), box-shadow .16s var(--ease);
-}
-.swatch:active { transform: scale(.96); }
-.swatch[aria-checked="true"] {
-  border-color: var(--accent);
-  box-shadow: inset 0 0 0 1px var(--accent);
-}
-.swatch__chip {
+/* 外观面板：四行同一个节奏，左标签右控件。
+   原来配色是四张带边框的大卡片，一张卡里塞了圆环加名字，
+   四层装饰只为说明「一个颜色」。现在就是四个点 —— 挑配色是看出来的，
+   不是读「青瓷」两个字读出来的。名字留在 aria-label 里给读屏。 */
+.optrow {
   display: flex;
-  width: 38px; height: 38px;
-  border-radius: var(--r-pill);
-  overflow: hidden;
-  border: 1px solid var(--hair-soft);
+  align-items: center;
+  gap: 14px;
+  padding: 10px 16px;
+  min-height: 54px;
 }
-.swatch__chip i { flex: 1; }
-.swatch__name {
-  font-size: 12.5px;
-  font-weight: 550;
-  letter-spacing: -.01em;
-  color: var(--ink);
+.optrow + .optrow { border-top: 1px solid var(--hair-soft); }
+.optrow__label {
+  font-size: 14.5px;
+  letter-spacing: -.012em;
+  flex: none;
 }
-.swatch[aria-checked="true"] .swatch__name { color: var(--accent); }
+.optrow > :last-child { margin-left: auto; }
 
+.seg--sm {
+  margin: 0;
+  flex: 1 1 auto;
+  max-width: 238px;
+}
+.seg--sm .seg__btn { padding: 6px 8px; font-size: 12.5px; }
+
+.dots { display: flex; gap: 12px; }
+.dot {
+  width: 24px; height: 24px;
+  border-radius: var(--r-pill);
+  transition: transform .12s var(--ease), box-shadow .16s var(--ease);
+}
+.dot:active { transform: scale(.88); }
+/* 选中环：先留一圈卡片底色的空隙，再描一道 --ink。
+   用点自己的颜色描环在深色下几乎看不见（雾灰本来就暗），中性色两种主题都清楚。
+   box-shadow 不占位，所以四个点的间距不会因为选中而跳。 */
+.dot[aria-checked="true"] {
+  box-shadow: 0 0 0 3px var(--surface), 0 0 0 4.5px var(--ink);
+}
+/* 很窄的屏上标签和胶囊挤在一起，就让它换行、控件撑满 */
 @media (max-width: 359px) {
-  .swatches { grid-template-columns: repeat(2, 1fr); }
+  .optrow { flex-wrap: wrap; gap: 8px 14px; padding: 12px 16px; }
+  .optrow > :last-child { margin-left: 0; max-width: none; width: 100%; }
 }
 
 /* ==========================================================================
