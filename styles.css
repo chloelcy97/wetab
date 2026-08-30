@@ -706,10 +706,19 @@ img { max-width: 100%; display: block; }
   transition: color var(--t-fast) var(--ease);
   position: relative;
 }
-.seg__btn[aria-selected="true"] {
+.seg__btn[aria-selected="true"],
+.seg__btn[aria-checked="true"] {
   color: var(--ink);
   background: var(--surface);
   box-shadow: var(--shadow-sm);
+}
+/* 配色那一格放一个色点。用的还是同一条胶囊、同一个白色滑块，
+   这样外观卡四行是同一个形、同一种「选中」的说法。 */
+.seg__btn--swatch { display: grid; place-items: center; padding: 6px 4px; }
+.seg__btn--swatch i {
+  display: block;
+  width: 15px; height: 15px;
+  border-radius: var(--r-pill);
 }
 .seg__btn:active { transform: scale(.97); }
 
@@ -1426,10 +1435,11 @@ button.listrow:hover { background: var(--surface-2); }
 /* ==========================================================================
    配色选择
    ========================================================================== */
-/* 外观面板：四行同一个节奏，左标签右控件。
-   原来配色是四张带边框的大卡片，一张卡里塞了圆环加名字，
-   四层装饰只为说明「一个颜色」。现在就是四个点 —— 挑配色是看出来的，
-   不是读「青瓷」两个字读出来的。名字留在 aria-label 里给读屏。 */
+/* 外观面板：四行同一个节奏，左标签右控件，四行共用同一条胶囊。
+   一开始配色是四张带边框的大卡片，一张卡里塞了圆环加名字，四层装饰只为说明一个颜色；
+   收成四个点之后又只剩它和上下三行不是一个形，选中方式也不一样。
+   现在配色也走胶囊分段，格子里放一个色点 —— 挑配色是看出来的，
+   不是读「青瓷」两个字读出来的，名字留在 aria-label 里给读屏。 */
 .optrow {
   display: flex;
   align-items: center;
@@ -1452,19 +1462,6 @@ button.listrow:hover { background: var(--surface-2); }
 }
 .seg--sm .seg__btn { padding: 6px 8px; font-size: 12.5px; }
 
-.dots { display: flex; gap: 12px; }
-.dot {
-  width: 24px; height: 24px;
-  border-radius: var(--r-pill);
-  transition: transform var(--t-press) var(--ease-press), box-shadow var(--t-fast) var(--ease);
-}
-.dot:active { transform: scale(.88); }
-/* 选中环：先留一圈卡片底色的空隙，再描一道 --ink。
-   用点自己的颜色描环在深色下几乎看不见（雾灰本来就暗），中性色两种主题都清楚。
-   box-shadow 不占位，所以四个点的间距不会因为选中而跳。 */
-.dot[aria-checked="true"] {
-  box-shadow: 0 0 0 3px var(--surface), 0 0 0 4.5px var(--ink);
-}
 /* 很窄的屏上标签和胶囊挤在一起，就让它换行、控件撑满 */
 @media (max-width: 359px) {
   .optrow { flex-wrap: wrap; gap: 8px 14px; padding: 12px 16px; }

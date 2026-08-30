@@ -76,7 +76,7 @@ const S = {
     'trip.oneMove': (who, amt) => `${who} 转 ${amt} 即可结清`,
     'trip.nMoves': (n) => `${n} 笔转账即可结清`,
     'trip.nameLabel': '名字',
-    'trip.namePlaceholder': '例如：東京、清邁、搬家',
+    'trip.namePlaceholder': '例如：东京、清迈、搬家',
     'trip.nameErr': '请为项目取一个名称',
     'trip.from': '开始',
     'trip.to': '结束',
@@ -634,7 +634,10 @@ export const getLang = () => lang;
 /* <html lang> 和标签页标题都跟着走。lang 属性屏幕阅读器和浏览器的翻译提示都看。
    放在 applyLang 里，加载时和切换时走同一条路，不会漏。 */
 function applyLang() {
-  document.documentElement.lang = lang === 'zh' ? 'zh-Hant-HK' : 'en';
+  // 必须和文案实际用的字形一致。之前写的是 zh-Hant-HK（繁体香港），
+  // 而文案是简体、字体栈要的是 PingFang SC —— 浏览器会按繁体的字形变体去渲染简体字，
+  // 字没错，形却是歪的，看上去就像打错了字。
+  document.documentElement.lang = lang === 'zh' ? 'zh-Hans' : 'en';
   document.title = t('app.title');
 }
 applyLang();

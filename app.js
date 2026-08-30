@@ -361,7 +361,7 @@ function guessTrip(dateISO) {
    月份用缩写就没有这个问题，中文那边照样是「8月9日」。 */
 const tripRange = (t) => {
   if (!t.from || !t.to) return '';
-  const fmtD = new Intl.DateTimeFormat(getLang() === 'zh' ? 'zh-Hant-HK' : 'en-GB',
+  const fmtD = new Intl.DateTimeFormat(getLang() === 'zh' ? 'zh-Hans' : 'en-GB',
                                        { month: 'short', day: 'numeric' });
   const f = (iso) => fmtD.format(new Date(iso + 'T00:00:00'));
   return t.from === t.to ? f(t.from) : `${f(t.from)} - ${f(t.to)}`;
@@ -378,7 +378,7 @@ function dayLabel(iso) {
   if (diff === 0) return tr('date.today');
   if (diff === 1) return tr('date.yesterday');
   const sameYear = d.getFullYear() === today.getFullYear();
-  return new Intl.DateTimeFormat(getLang() === 'zh' ? 'zh-Hant-HK' : 'en-GB', {
+  return new Intl.DateTimeFormat(getLang() === 'zh' ? 'zh-Hans' : 'en-GB', {
     year: sameYear ? undefined : 'numeric',
     month: 'long', day: 'numeric', weekday: 'short',
   }).format(d);
@@ -1181,12 +1181,13 @@ function lookPanel() {
             seg('data-lang', LANGS, getLang(), tr('set.language')))}
 
       ${row(tr('set.palette'), `
-        <div class="dots" role="radiogroup" aria-label="${tr('set.palette')}">
+        <div class="seg seg--sm" role="radiogroup" aria-label="${tr('set.palette')}">
           ${PALETTES.map((p) => `
-            <button class="dot" role="radio" data-palette="${p.id}"
+            <button class="seg__btn seg__btn--swatch" role="radio" data-palette="${p.id}"
                     aria-checked="${look.palette === p.id}"
-                    aria-label="${tr('pal.' + p.id)}"
-                    style="background:${p.swatch[0]}"></button>`).join('')}
+                    aria-label="${tr('pal.' + p.id)}">
+              <i style="background:${p.swatch[0]}"></i>
+            </button>`).join('')}
         </div>`)}
 
       ${row(tr('set.mode'),
