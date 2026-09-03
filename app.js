@@ -229,6 +229,17 @@ function touchMeta() { state.metaDirty = true; }
 
 const liveExpenses = () => state.expenses.filter((e) => !e.deleted);
 
+/* 归档：结清之后把这一范围的账整批收起来，账本里不再堆着。
+
+   只在整个范围彻底两清时才归档，而且是「这个范围里的全部记录」一起走，
+   开销和那笔转账一并收。这一批的净额恒为 0，所以移出账本之后，
+   剩下的余额一分不差 —— 部分结算（还欠着）不归档，就是这个道理。
+
+   统计仍然算归档的账：钱是真花掉了，历史不该因为结清就消失。
+   归档只让账本列表和余额卡清爽。 */
+const isArchived = (e) => !!e.archivedAt;
+const activeExpenses = () => liveExpenses().filter((e) => !isArchived(e));
+
 /* 两人时代的 split 三选一，到多人就是「这笔由谁分摊」的集合。
    even  → 所有人      payer → 只有付款人      other → 除付款人以外的人
    读档时就地迁移一次，之后只认 participants。 */
@@ -327,12 +338,38 @@ const sorted = (list = liveExpenses()) => [...list].sort(
    ========================================================================== */
 const tripOf = (id) => state.trips.find((t) => t.id === id && !t.deleted) || null;
 
-/** 按当前筛选取记录 */
-function scopedExpenses(scope = activeTrip) {
-  const live = liveExpenses();
+/** 按当前筛选取记录。默认不含已归档 —— 账本和余额卡看的是「还没结清的账」 */
+function scopedExpenses(scope = activeTrip, { withArchived = false } = {}) {
+  const live = withArchived ? liveExpenses() : activeExpenses();
   if (scope === 'all') return live;
   if (scope === 'daily') return live.filter((e) => !e.tripId);
   return live.filter((e) => e.tripId === scope);
+}
+
+/**
+ * 结清之后试着整批归档。返回归档了几笔，没归档返回 0。
+ * 只有全员净额都归零才动手：净额为 0 的一批移走，剩下的账才不会变。
+ */
+function maybeArchive(list) {
+  if (!list.length) return 0;
+  const net = balances(list);
+  if (!Object.values(net).every((v) => Math.abs(v) < 0.005)) return 0;
+  const at = new Date().toISOString();
+  list.forEach((e) => { e.archivedAt = at; touch(e); });
+  return list.length;
+}
+
+/** 已归档的账，按「哪一次归档」分组，新的在前 */
+function archiveBatches() {
+  const map = new Map();
+  for (const e of liveExpenses()) {
+    if (!isArchived(e)) continue;
+    if (!map.has(e.archivedAt)) map.set(e.archivedAt, []);
+    map.get(e.archivedAt).push(e);
+  }
+  return [...map.entries()]
+    .map(([at, items]) => ({ at, items }))
+    .sort((a, b) => (a.at < b.at ? 1 : -1));
 }
 
 /** 一个项目的汇总：总花费、每人份额、起止日期、笔数 */
@@ -940,6 +977,14 @@ function viewSettings() {
         ${icon('arrows-clockwise')}
         <span class="listrow__label">${tr('set.import')}</span>
       </button>
+      ${archiveBatches().length ? `
+      <button class="listrow" data-archive>
+        ${icon('check')}
+        <span class="listrow__label">${tr('set.archive')}</span>
+        <span class="listrow__value num">${tr('entries',
+          liveExpenses().filter(isArchived).length)}</span>
+        ${icon('caret-right')}
+      </button>` : ''}
       <button class="listrow" data-clear>
         ${icon('trash')}
         <span class="listrow__label">${tr('set.clear')}</span>
@@ -1449,6 +1494,9 @@ function wireView() {
     f.click();
   };
 
+  const arch = $('[data-archive]');
+  if (arch) arch.onclick = openArchive;
+
   const clr = $('[data-clear]');
   if (clr) clr.onclick = () => confirmSheet({
     title: tr('clear.title'),
@@ -1636,9 +1684,66 @@ function openSettle() {
           date: todayISO(), participants: [], tripId: trip ? trip.id : null,
           createdAt: Date.now(),
         }));
+        // 这个范围如果就此两清，整批收进归档
+        const n = maybeArchive(scopedExpenses());
         save(); closeSheetNow(); render(); queueSync();
-        toast(tr('settle.done'), 'check');
+        toast(n ? tr('settle.archived', n) : tr('settle.done'), 'check');
       };
+    },
+  });
+}
+
+/* ==========================================================================
+   归档
+
+   一次结清 = 一批。批内净额恒为 0，所以整批恢复回账本也不会让余额出错。
+   ========================================================================== */
+function scopeNameOf(items) {
+  const ids = new Set(items.map((e) => e.tripId || null));
+  if (ids.size > 1) return tr('trip.all');
+  const id = [...ids][0];
+  if (!id) return tr('trip.daily');
+  const t = state.trips.find((x) => x.id === id);
+  return t ? t.name : tr('trip.all');
+}
+
+function openArchive() {
+  const batches = archiveBatches();
+  openSheet({
+    title: tr('arch.title'),
+    body: `
+      <div class="alert">${icon('check')}<span>${tr('arch.intro')}</span></div>
+      <div class="card" style="margin-top:16px">
+        ${batches.map((b, i) => {
+          const spend = b.items.filter((e) => e.type !== 'settle');
+          const total = spend.reduce(
+            (n, e) => n + convert(e.amount, e.currency, state.display), 0);
+          return `
+          <div class="listrow">
+            <div style="margin-right:auto;min-width:0">
+              <div>${esc(scopeNameOf(b.items))}</div>
+              <div class="sub num">${dayLabel(b.at.slice(0, 10))} · ${
+                tr('entries', b.items.length)}</div>
+            </div>
+            <span class="num" style="font-weight:600">${fmt(total, state.display)}</span>
+            <button class="linkbtn" data-restore="${i}"
+                    style="margin-left:14px">${tr('arch.restore')}</button>
+          </div>`;
+        }).join('')}
+      </div>`,
+    foot: `<button class="btn btn--primary btn--block" data-close>${tr('act.ok')}</button>`,
+    onMount: (host) => {
+      host.querySelectorAll('[data-restore]').forEach((el) => {
+        el.onclick = () => {
+          const b = batches[+el.dataset.restore];
+          b.items.forEach((e) => {
+            const rec = state.expenses.find((x) => x.id === e.id);
+            if (rec) { delete rec.archivedAt; touch(rec); }
+          });
+          save(); closeSheetNow(); render(); queueSync();
+          toast(tr('arch.restored', b.items.length), 'check');
+        };
+      });
     },
   });
 }
@@ -2209,6 +2314,7 @@ function normEntry(e, ids) {
       : ids.slice()),
     toId: e.toId || (e.type === 'settle' ? others[0] || null : null),
     tripId: e.tripId || null,
+    archivedAt: e.archivedAt || null,
     deleted: !!e.deleted, createdAt: Number(e.createdAt) || 0, updatedAt: e.updatedAt,
   }, !parts];
 }

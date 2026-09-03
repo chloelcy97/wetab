@@ -50,6 +50,7 @@ create table if not exists public.entries (
   split      text,                                 -- 两人时代的遗留列，只读不写
   participants jsonb,                              -- 这笔由谁分摊（多人）
   to_id      text,                                 -- 结算：转给谁
+  archived_at timestamptz,                         -- 结清后整批归档的时刻，同一批同一个值
   trip_id    text,
   deleted    boolean not null default false,
   created_at bigint,                               -- 客户端时间戳，仅用于同日排序
@@ -60,6 +61,8 @@ create table if not exists public.entries (
 -- 老库直接跑这段就能升级，旧行由下面的 update 就地迁移。
 alter table public.entries add column if not exists participants jsonb;
 alter table public.entries add column if not exists to_id text;
+-- 归档：结清之后整批收起来。同一批共用一个时间戳，恢复时按这个值整批取回。
+alter table public.entries add column if not exists archived_at timestamptz;
 
 -- 旧行迁移：split 三选一 → participants 集合。只跑一次，之后 participants 非空就跳过。
 update public.entries e set participants = (
@@ -183,7 +186,7 @@ begin
         'id', e.id, 'type', e.type, 'payerId', e.payer_id, 'amount', e.amount,
         'currency', e.currency, 'cat', e.cat, 'merchant', e.merchant, 'note', e.note,
         'date', e.entry_date, 'participants', coalesce(e.participants, '[]'::jsonb),
-        'toId', e.to_id, 'tripId', e.trip_id,
+        'toId', e.to_id, 'tripId', e.trip_id, 'archivedAt', e.archived_at,
         'deleted', e.deleted, 'createdAt', e.created_at, 'updatedAt', e.updated_at))
       from entries e where e.ledger_id = v_id and e.updated_at > v_since
     ), '[]'::jsonb)
@@ -226,13 +229,14 @@ begin
   for r in select * from jsonb_array_elements(coalesce(p_entries, '[]'::jsonb)) loop
     insert into entries (id, ledger_id, type, payer_id, amount, currency, cat,
                          merchant, note, entry_date, participants, to_id, trip_id,
-                         deleted, created_at, updated_at)
+                         archived_at, deleted, created_at, updated_at)
     values (
       r->>'id', v_id, coalesce(r->>'type', 'expense'), r->>'payerId',
       (r->>'amount')::numeric, r->>'currency', nullif(r->>'cat', ''),
       nullif(r->>'merchant', ''), nullif(r->>'note', ''), (r->>'date')::date,
       coalesce(r->'participants', '[]'::jsonb), nullif(r->>'toId', ''),
       nullif(r->>'tripId', ''),
+      nullif(r->>'archivedAt', '')::timestamptz,
       coalesce((r->>'deleted')::boolean, false),
       nullif(r->>'createdAt', '')::bigint, now())
     on conflict (id) do update set
@@ -240,7 +244,8 @@ begin
       currency = excluded.currency, cat = excluded.cat, merchant = excluded.merchant,
       note = excluded.note, entry_date = excluded.entry_date,
       participants = excluded.participants, to_id = excluded.to_id,
-      trip_id = excluded.trip_id, deleted = excluded.deleted, updated_at = now()
+      trip_id = excluded.trip_id, archived_at = excluded.archived_at,
+      deleted = excluded.deleted, updated_at = now()
     where entries.ledger_id = v_id;
   end loop;
 

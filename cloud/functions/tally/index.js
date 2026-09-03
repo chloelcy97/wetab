@@ -123,7 +123,7 @@ async function pull({ code, since }) {
       id: e.id, type: e.type, payerId: e.payerId, amount: e.amount,
       currency: e.currency, cat: e.cat, merchant: e.merchant, note: e.note,
       date: e.date, participants: e.participants || [], toId: e.toId,
-      tripId: e.tripId, deleted: !!e.deleted,
+      tripId: e.tripId, archivedAt: e.archivedAt || null, deleted: !!e.deleted,
       createdAt: e.createdAt || 0, updatedAt: iso(e.updatedAt),
     })),
   };
@@ -171,6 +171,7 @@ async function push({ code, entries, trips, members }) {
         participants: Array.isArray(e.participants) ? e.participants : [],
         toId: e.toId || null,
         tripId: e.tripId || null,
+        archivedAt: e.archivedAt || null,
         deleted: !!e.deleted,
         createdAt: Number(e.createdAt) || 0,
         updatedAt: now,
