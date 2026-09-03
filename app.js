@@ -523,10 +523,11 @@ function viewLedger() {
        <div class="moves">
          ${moves.map((m) => `
            <div class="move">
-             ${avatar(m.from, 'sm')}
-             <span class="move__arrow">${icon('arrow-right')}</span>
-             ${avatar(m.to, 'sm')}
-             <span class="move__who">${esc(memberName(m.from))} → ${esc(memberName(m.to))}</span>
+             <span class="move__side">${avatar(m.from, 'sm')}<span>${
+               esc(memberName(m.from))}</span></span>
+             ${icon('arrow-right', 'icon move__arrow')}
+             <span class="move__side">${avatar(m.to, 'sm')}<span>${
+               esc(memberName(m.to))}</span></span>
              <span class="move__amt num">${fmt(m.amount, state.display)}</span>
            </div>`).join('')}
        </div>`;
@@ -543,9 +544,11 @@ function viewLedger() {
           ${ms.map((m) => who(m, totals[m.id] || 0)).join('')}
         </div>
         ${settled ? '' : `
-          <button class="btn btn--ghost btn--block" data-settle style="margin-top:16px">
-            ${icon('arrow-u-down-left')}${tr('act.settle')}
-          </button>`}
+          <button class="btn btn--ghost btn--block" data-payoff style="margin-top:16px">
+            ${icon('check')}${tr('act.payoff')}
+          </button>
+          <button class="linkbtn" data-settle
+                  style="display:block;margin:11px auto 0">${tr('settle.partial')}</button>`}
       </section>
 
       <div>
@@ -1445,6 +1448,9 @@ function wireView() {
   const settle = $('[data-settle]');
   if (settle) settle.onclick = openSettle;
 
+  const payoff = $('[data-payoff]');
+  if (payoff) payoff.onclick = payoffAll;
+
   const exp = $('[data-export]');
   if (exp) exp.onclick = () => {
     const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
@@ -1619,6 +1625,38 @@ function confirmSheet({ title, body, danger, onOk }) {
 /* ==========================================================================
    结清
    ========================================================================== */
+
+/**
+ * 一键还清：把当前范围里建议的转账全部记下来，一笔不落。
+ *
+ * 金额直接用建议值、币种用当前显示的币种 —— 不再问一次汇率，
+ * 这正是「还清」和「结算」的分别：前者不需要你做任何决定。
+ * 记完余额必然归零，紧接着触发整批归档。
+ *
+ * 不弹二次确认：这一步是可逆的 —— 归档面板里能整批恢复，
+ * 转账记录本身也能点开删掉。为一个能撤销的操作加一道门槛不值当。
+ */
+function payoffAll() {
+  const scoped = scopedExpenses();
+  const moves = settlements(balances(scoped));
+  if (!moves.length) { toast(tr('settle.already'), 'check'); return; }
+
+  const trip = tripOf(activeTrip);
+  const cur = state.display;
+  for (const m of moves) {
+    state.expenses.push(touch({
+      id: uid(), type: 'settle', payerId: m.from, toId: m.to,
+      amount: Math.round(m.amount * 100) / 100, currency: cur,
+      cat: 'shop', merchant: '', note: '',
+      date: todayISO(), participants: [], tripId: trip ? trip.id : null,
+      createdAt: Date.now(),
+    }));
+  }
+  const n = maybeArchive(scopedExpenses());
+  save(); render(); queueSync();
+  toast(n ? tr('settle.archived', n) : tr('settle.done'), 'check');
+}
+
 function openSettle() {
   const scoped = scopedExpenses();
   const moves = settlements(balances(scoped));
