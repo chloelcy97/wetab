@@ -338,13 +338,22 @@ const sorted = (list = liveExpenses()) => [...list].sort(
    ========================================================================== */
 const tripOf = (id) => state.trips.find((t) => t.id === id && !t.deleted) || null;
 
-/** 按当前筛选取记录。默认不含已归档 —— 账本和余额卡看的是「还没结清的账」 */
+/**
+ * 按当前筛选取记录。默认不含已归档 —— 账本和余额卡看的是「还没结清的账」。
+ *
+ * 但点进某一趟具体的项目时要另说：那是在问「这趟花了什么」，
+ * 把归档的藏起来会得到一句「暂无记录」，而这趟明明花过钱。
+ * 所以列表那一路对具体项目传 withArchived，结算和余额那一路不传。
+ */
 function scopedExpenses(scope = activeTrip, { withArchived = false } = {}) {
   const live = withArchived ? liveExpenses() : activeExpenses();
   if (scope === 'all') return live;
   if (scope === 'daily') return live.filter((e) => !e.tripId);
   return live.filter((e) => e.tripId === scope);
 }
+
+/** 项目 chip 只列还没结清的。整趟结清之后它去统计页，首页不再堆着 */
+const barTrips = () => liveTrips().filter((t) => !tripSettled(t.id));
 
 /**
  * 结清之后试着整批归档。返回归档了几笔，没归档返回 0。
@@ -370,6 +379,12 @@ function archiveBatches() {
   return [...map.entries()]
     .map(([at, items]) => ({ at, items }))
     .sort((a, b) => (a.at < b.at ? 1 : -1));
+}
+
+/** 这一趟是不是已经全部结清归档了。空项目不算 —— 它只是还没开始记 */
+function tripSettled(id) {
+  const list = liveExpenses().filter((e) => e.tripId === id);
+  return list.length > 0 && list.every(isArchived);
 }
 
 /** 一个项目的汇总：总花费、每人份额、起止日期、笔数 */
@@ -490,7 +505,9 @@ function renderRail() {
 /* ---------- 账本 ---------- */
 function viewLedger() {
   const scope = activeTrip;
-  const list = sorted(scopedExpenses());
+  // 点进某一趟时连归档的一起看 —— 那是在追溯这趟花了什么
+  const inTrip = activeTrip !== 'all' && activeTrip !== 'daily';
+  const list = sorted(scopedExpenses(activeTrip, { withArchived: inTrip }));
   const net = balances(list);
   const moves = settlements(net);
   const settled = moves.length === 0;
@@ -573,10 +590,14 @@ function viewLedger() {
       <button class="chip" role="tab" data-scope="daily" aria-selected="${scope === 'daily'}">
         ${icon('house-line')}${tr('trip.daily')}
       </button>
-      ${liveTrips().map((t) => `
+      ${barTrips().map((t) => `
         <button class="chip" role="tab" data-scope="${t.id}" aria-selected="${scope === t.id}">
           ${icon('airplane-tilt')}${esc(t.name)}
         </button>`).join('')}
+      ${liveTrips().some((t) => tripSettled(t.id) && t.id === scope) ? `
+        <button class="chip" role="tab" data-scope="${scope}" aria-selected="true">
+          ${icon('check')}${esc(tripOf(scope)?.name || '')}
+        </button>` : ''}
       <button class="chip chip--new" data-new-trip>${icon('plus')}${tr('trip.new')}</button>
     </div>`;
 
@@ -606,7 +627,8 @@ function viewLedger() {
     </div>` : `
     <div class="sec">
       <h2>${tr('ledger.spend')}</h2>
-      <span class="sec__aside">${tr('ledger.total', list.length)}</span>
+      <span class="sec__aside">${tr('ledger.total',
+        list.filter((e) => e.type !== 'settle').length)}</span>
     </div>
     ${groups.map(dayGroup).join('')}`;
 
@@ -654,9 +676,10 @@ function markScrollable() {
 addEventListener('resize', markScrollable);
 
 function rowHTML(e, i = 0) {
+  const arch = isArchived(e) ? ' row--archived' : '';
   const delay = (animateRows && !reduceMotion())
-    ? `class="row row--in" style="animation-delay:${Math.min(i * 35, 280)}ms"`
-    : 'class="row"';
+    ? `class="row row--in${arch}" style="animation-delay:${Math.min(i * 35, 280)}ms"`
+    : `class="row${arch}"`;
   const payer = memberName(e.payerId);
   const shown = convert(e.amount, e.currency, state.display);
   const orig = e.currency !== state.display ? `<div class="sub num">${fmt(e.amount, e.currency)}</div>` : '';
@@ -789,7 +812,8 @@ function tripsSection() {
       ${sums.map((s, i) => `
         <button class="tripcard" data-open-trip="${s.trip.id}">
           <div class="tripcard__top">
-            <span class="tripcard__name">${icon('airplane-tilt')}${esc(s.trip.name)}</span>
+            <span class="tripcard__name">${
+              icon(tripSettled(s.trip.id) ? 'check' : 'airplane-tilt')}${esc(s.trip.name)}</span>
             <span class="tripcard__meta num">${tripRange(s.trip) || tr('trip.noDate')}${
               s.days ? ' · ' + tr('trip.days', s.days) : ''}</span>
           </div>
@@ -800,7 +824,9 @@ function tripsSection() {
             ${liveMembers().filter((m) => (s.totals[m.id] || 0) > 0.005).map((m) => `
               <span>${esc(m.name)} ${fmt(s.totals[m.id] || 0, state.display)}</span>`).join('')}
           </div>
-          ${!s.settle.length ? '' : `
+          ${tripSettled(s.trip.id)
+            ? `<div class="tripcard__net tripcard__net--done">${tr('trip.settledDone')}</div>`
+            : !s.settle.length ? '' : `
             <div class="tripcard__net">${s.settle.length === 1
               ? tr('trip.oneMove', esc(memberName(s.settle[0].from)), fmt(s.settle[0].amount, state.display))
               : tr('trip.nMoves', s.settle.length)}</div>`}

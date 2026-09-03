@@ -96,6 +96,7 @@ const S = {
     'trip.delOk': '删除项目',
     'trip.autoFiled': (n) => `已按日期归入「${n}」`,
     'trip.beforeTrip': '出行前建一个，这次的开销单独结算。',
+    'trip.settledDone': '已结清 · 点开看这趟的账',
 
     /* ---- 账本列表 ---- */
     'ledger.spend': '开销',
@@ -407,6 +408,7 @@ const S = {
     'trip.delOk': 'Delete trip',
     'trip.autoFiled': (n) => `Filed under ${n} by date`,
     'trip.beforeTrip': 'Start one before you go and the trip settles on its own.',
+    'trip.settledDone': 'Settled · open to see this trip',
 
     'ledger.spend': 'Spending',
     'ledger.total': (n) => (n === 1 ? '1 entry' : `${n} entries`),

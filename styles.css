@@ -685,6 +685,10 @@ img { max-width: 100%; display: block; }
 .avatar--m7 { background: var(--member-7); color: var(--on-member-7); }
 .avatar--sm { width: 22px; height: 22px; font-size: 10px; }
 
+/* 已结清归档的记录：还看得见，但退到背景里，一眼能和「还欠着的」分开 */
+.row--archived { opacity: .58; }
+.tripcard__net--done { color: var(--muted); }
+
 /* ---------- 余额卡里的转账清单 ----------
    之前这一段完全没有样式：markup 写了，CSS 从来没加过。
    两人时永远只有一笔转账、走的是大数字那条分支，所以一直没露出来；
